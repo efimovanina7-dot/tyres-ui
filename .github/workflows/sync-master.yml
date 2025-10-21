@@ -1,0 +1,41 @@
+name: Sync master.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "Откуда тянуть JSON (оставь пустым — возьмём дефолт)"
+        required: false
+        type: string
+  schedule:
+    - cron: "*/30 * * * *"  # каждые 30 минут
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch master.json
+        env:
+          SRC: ${{ github.event.inputs.source_url }}
+          DEFAULT_SRC: https://files.selectyre.ru/53ed1d72-676e-42eb-b65e-900558c3fb63.json
+        run: |
+          set -e
+          URL="${SRC:-$DEFAULT_SRC}"
+          mkdir -p docs/data
+          curl -fsSL "$URL" -o docs/data/master.json
+          echo "Fetched from: $URL"
+          ls -lh docs/data/master.json
+
+      - name: Commit & push
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/master.json
+          git commit -m "sync: update master.json" || echo "No changes to commit"
+          git push
