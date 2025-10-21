@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Диагностика master.json</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ok:#86efac;--bad:#fca5a5}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 4px 24px rgba(0,0,0,.25);margin-bottom:16px}
+  code,pre{font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+  .kv{display:grid;grid-template-columns:220px 1fr;gap:8px}
+  .kv div:first-child{color:var(--muted)}
+  .ok{color:var(--ok)} .bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Диагностика master.json</h1>
+  <div class="card">
+    <div class="kv">
+      <div>URL</div><div><code id="url"></code></div>
+      <div>HTTP</div><div id="status">—</div>
+      <div>Items</div><div id="items">—</div>
+      <div>Поставщики</div><div id="sups">—</div>
+      <div>Города</div><div id="cities">—</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Первый элемент</h3>
+    <pre id="first">—</pre>
+  </div>
+</div>
+<script>
+const URL_ = 'data/master.json';
+const els={url:document.getElementById('url'),status:status,items:items,sups:sups,cities:cities,first:first};
+els.url.textContent=URL_;
+function bigArr(o,d=0,b={len:0,arr:null}){if(d>4||!o)return b;if(Array.isArray(o)&&o.length&&typeof o[0]==='object'){if(o.length>b.len)b={len:o.length,arr:o};}else if(typeof o==='object'){for(const v of Object.values(o))b=bigArr(v,d+1,b);}return b;}
+(async()=>{
+  try{
+    const r=await fetch(URL_+'?t='+Date.now(),{cache:'no-store'}); els.status.innerHTML=r.ok?'<span class="ok">OK</span>':'<span class="bad">'+r.status+'</span>';
+    const data=await r.json(); let items=Array.isArray(data)?data:null; if(!items){ for(const k of ['items','data','result','products']) if(Array.isArray(data?.[k])){ items=data[k]; break; } }
+    if(!items||!items.length) items=bigArr(data).arr||[];
+    els.items.textContent=items.length;
+    const supSet=new Set(), citySet=new Set();
+    for(const it of items){
+      const list=Array.isArray(it.suppliers)?it.suppliers:(it.supplier||it.supplier_name||it.vendor||it.provider?[it]:[]);
+      for(const s of list){ if(s.supplier||s.supplier_name||s.vendor||s.provider) supSet.add(s.supplier||s.supplier_name||s.vendor||s.provider);
+        if(s.warehouse_city||s.city||s.warehouseCity) citySet.add(s.warehouse_city||s.city||s.warehouseCity);
+      }
+    }
+    els.sups.textContent=[...supSet].slice(0,10).join(', ')||'(нет)';
+    els.cities.textContent=[...citySet].slice(0,10).join(', ')||'(нет)';
+    els.first.textContent=items.length?JSON.stringify(items[0],null,2):'(пусто)';
+  }catch(e){ els.status.innerHTML='<span class="bad">ERR</span>'; els.first.textContent=String(e); }
+})();
+</script>
+</body>
+</html>
