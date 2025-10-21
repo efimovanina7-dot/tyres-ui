@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Диагностика master.json — поставщики/города/остатки</title>
+<title>Диагностика master + inventory</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ok:#86efac;--bad:#fca5a5;--warn:#facc15}
@@ -10,7 +10,7 @@
   .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
   .card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 4px 24px rgba(0,0,0,.25);margin-bottom:16px}
   code,pre{font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
-  .kv{display:grid;grid-template-columns:260px 1fr;gap:8px}
+  .kv{display:grid;grid-template-columns:280px 1fr;gap:8px}
   .kv div:first-child{color:var(--muted)}
   .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
   .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -20,114 +20,98 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Диагностика master.json</h1>
+  <h1>Диагностика master.json + inventory.json</h1>
 
   <div class="card">
     <div class="kv">
-      <div>Попытка 1 (предпочтительно)</div><div><code id="url1">data/master.json</code></div>
-      <div>Попытка 2 (fallback)</div><div><code id="url2">master.json</code> <span class="muted">(если первый путь 404)</span></div>
-      <div>Статус загрузки</div><div id="status">—</div>
-      <div>Количество товаров (items)</div><div id="items">—</div>
-      <div>Всего предложений (offers)</div><div id="offers">—</div>
+      <div>master.json (товары)</div><div id="mStatus">—</div>
+      <div>inventory.json (остатки)</div><div id="iStatus">—</div>
+      <div>Товаров (master)</div><div id="mItems">—</div>
+      <div>Записей в inventory</div><div id="iItems">—</div>
+      <div>Всего offers</div><div id="offers">—</div>
       <div>Уникальных поставщиков</div><div id="supCount">—</div>
       <div>Уникальных городов</div><div id="cityCount">—</div>
       <div>Offers с qty &gt; 0</div><div id="qtyOffers">—</div>
-      <div>Товаров с quantity на уровне товара</div><div id="qtyItems">—</div>
-      <div>Итог проверки</div><div id="summary">—</div>
+      <div>Покрытие master (товаров с ≥1 offer)</div><div id="coverage">—</div>
+      <div>Итог</div><div id="summary">—</div>
     </div>
   </div>
 
   <div class="card">
-    <h3>Примеры значений</h3>
-    <div class="chips" id="supChips"></div>
-    <div class="chips" id="cityChips" style="margin-top:8px"></div>
+    <h3>Коды, которых нет в master (только в inventory) — первые 20</h3>
+    <div id="invOnly" class="chips"></div>
   </div>
 
   <div class="card">
-    <h3>Проблемные строки (первые 10)</h3>
-    <ul id="problems"><li class="muted">Нет</li></ul>
+    <h3>Коды из master без предложений — первые 20</h3>
+    <div id="masterNoOffers" class="chips"></div>
   </div>
 
   <div class="card">
-    <h3>Первый элемент из массива</h3>
-    <pre id="first">—</pre>
+    <h3>Пример offer</h3>
+    <pre id="firstOffer">—</pre>
   </div>
 </div>
 <script>
-const PATHS = ['data/master.json','master.json']; // второй — на случай старой структуры
-const els = Object.fromEntries(['status','items','offers','supCount','cityCount','qtyOffers','qtyItems','summary','supChips','cityChips','problems','first'].map(id=>[id,document.getElementById(id)]));
-
-function bigArr(o,d=0,b={len:0,arr:null}){if(d>4||!o)return b;if(Array.isArray(o)&&o.length&&typeof o[0]==='object'){if(o.length>b.len)b={len:o.length,arr:o};}else if(typeof o==='object'){for(const v of Object.values(o))b=bigArr(v,d+1,b);}return b;}
-const S=v=>v==null?'':String(v);
-const N=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
-const get=(o,...ks)=>{for(const k of ks){if(o&&typeof o==='object'&&o[k]!=null&&S(o[k])!=='')return o[k]}return''};
-const getNum=(o,...ks)=>N(get(o,...ks));
+const MASTER_URL='data/master.json', INV_URL='data/inventory.json';
+const els = Object.fromEntries(['mStatus','iStatus','mItems','iItems','offers','supCount','cityCount','qtyOffers','coverage','summary','invOnly','masterNoOffers','firstOffer'].map(id=>[id,document.getElementById(id)]));
+const S=v=>v==null?'':String(v), N=v=>{const n=Number(v);return Number.isFinite(n)?n:0}, get=(o,...ks)=>{for(const k of ks){if(o&&typeof o==='object'&&o[k]!=null&&S(o[k])!=='')return o[k]}return''}, getNum=(o,...ks)=>N(get(o,...ks));
 
 (async()=>{
-  let data=null, lastErr=null, urlUsed=null, httpText='';  
-  for(const p of PATHS){
-    try{
-      const r = await fetch(p+'?t='+Date.now(),{cache:'no-store'});
-      httpText += `${p}: ${r.status}  `;
-      if(!r.ok) { lastErr = new Error('HTTP '+r.status); continue; }
-      data = await r.json(); urlUsed=p; break;
-    }catch(e){ lastErr=e; }
-  }
-  els.status.innerHTML = data ? `<span class="ok">OK</span> (${urlUsed})` : `<span class="bad">Ошибка</span> ${lastErr?lastErr.message:''} [${httpText}]`;
-  if(!data){ return; }
+  let master=null, invent=null;
+  try{ const r=await fetch(MASTER_URL+'?t='+Date.now(),{cache:'no-store'}); els.mStatus.innerHTML=r.ok?'<span class="ok">OK</span>':'<span class="bad">'+r.status+'</span>'; master=await r.json(); }catch(e){ els.mStatus.innerHTML='<span class="bad">ERR</span>'; }
+  try{ const r=await fetch(INV_URL+'?t='+Date.now(),{cache:'no-store'}); els.iStatus.innerHTML=r.ok?'<span class="ok">OK</span>':'<span class="bad">'+r.status+'</span>'; invent=await r.json(); }catch(e){ els.iStatus.innerHTML='<span class="bad">ERR</span>'; }
 
-  let items = Array.isArray(data)?data:null;
-  if(!items){ for(const k of ['items','data','result','products']) if(Array.isArray(data?.[k])){ items=data[k]; break; } }
-  if(!items || !items.length){ items = bigArr(data).arr || []; }
+  const mArr = Array.isArray(master)?master:(Array.isArray(master?.items)?master.items:(Array.isArray(master?.data)?master.data:[]));
+  const iArr = Array.isArray(invent)?invent:(Array.isArray(invent?.items)?invent.items:invent);
+  els.mItems.textContent = mArr.length;
+  els.iItems.textContent = Array.isArray(iArr)?iArr.length:Object.keys(iArr||{}).length;
 
-  els.items.textContent = items.length;
-
-  // Собираем метрики
-  let offersTotal=0, offersWithQty=0, itemsWithItemQty=0;
-  const supSet=new Set(), citySet=new Set();
-  const problems=[];
-
-  for(const it of items){
-    let offers = Array.isArray(it.suppliers) ? it.suppliers : (S(get(it,'supplier','supplier_name','vendor','provider')) ? [it] : []);
-    if(!offers.length){ problems.push('Товар без массива suppliers'); }
-    offersTotal += offers.length;
-    for(const s of offers){
-      const sup = S(get(s,'supplier','supplier_name','vendor','provider'));
-      const city = S(get(s,'warehouse_city','city','warehouseCity'));
-      const qty  = getNum(s,'qty','quantity','stock','rest');
-      if(sup) supSet.add(sup); else problems.push('Offer без имени поставщика');
-      if(city) citySet.add(city); else problems.push('Offer без города склада');
-      if(qty>0) offersWithQty++;
-      if(qty===0) problems.push('Offer без количества (qty=0 или пусто)');
+  const invMap=new Map(); let offersTotal=0, offersWithQty=0, first=null;
+  if(Array.isArray(iArr)){
+    for(const rec of iArr){
+      const key=S(get(rec,'code','offer_id','article','id','sku','product_code'));
+      let offers=Array.isArray(rec.offers)?rec.offers:(Array.isArray(rec.suppliers)?rec.suppliers:(Array.isArray(rec.proposals)?rec.proposals:(S(get(rec,'supplier','supplier_name','vendor','provider'))?[rec]:[])));
+      if(!key) continue; if(!offers) offers=[];
+      invMap.set(key,(invMap.get(key)||[]).concat(offers));
+      offersTotal += offers.length; if(!first && offers.length) first=offers[0];
     }
-    const itemQty = getNum(it,'quantity','qty','stock','rest');
-    if(itemQty>0) itemsWithItemQty++;
+  }else if(iArr && typeof iArr==='object'){
+    for(const [key,val] of Object.entries(iArr)){ const offers=Array.isArray(val)?val:(Array.isArray(val?.offers)?val.offers:[]); invMap.set(key,offers); offersTotal+=offers.length; if(!first && offers.length) first=offers[0]; }
   }
 
-  els.offers.textContent   = offersTotal;
-  els.qtyOffers.textContent= offersWithQty;
-  els.qtyItems.textContent = itemsWithItemQty;
-  els.supCount.textContent = `${supSet.size} шт.`;
-  els.cityCount.textContent= `${citySet.size} шт.`;
+  const supSet=new Set(), citySet=new Set();
+  for(const arr of invMap.values()){
+    for(const s of arr){
+      const sup=S(get(s,'supplier','supplier_name','vendor','provider'));
+      const city=S(get(s,'warehouse_city','city','warehouseCity'));
+      const qty=getNum(s,'qty','quantity','stock','rest');
+      if(sup) supSet.add(sup);
+      if(city) citySet.add(city);
+      if(qty>0) offersWithQty++;
+    }
+  }
+  els.offers.textContent=offersTotal;
+  els.supCount.textContent=supSet.size;
+  els.cityCount.textContent=citySet.size;
+  els.qtyOffers.textContent=offersWithQty;
 
-  // Вывод чипсов
-  els.supChips.innerHTML  = '<b style="margin-right:6px">Поставщики:</b>'+ [...supSet].slice(0,15).map(x=>`<span class="chip">${x}</span>`).join('') || '<span class="muted">нет</span>';
-  els.cityChips.innerHTML = '<b style="margin-right:6px">Города:</b>'+ [...citySet].slice(0,15).map(x=>`<span class="chip">${x}</span>`).join('') || '<span class="muted">нет</span>';
+  const masterCodes=new Set(mArr.map(x=>S(get(x,'code','offer_id','article','id','sku','p_code'))).filter(Boolean));
+  const invCodes=new Set(invMap.size?Array.from(invMap.keys()):[]);
+  const invOnly=[...invCodes].filter(x=>!masterCodes.has(x)).slice(0,20);
+  const masterNoOffers=[...masterCodes].filter(x=>!invCodes.has(x)).slice(0,20);
 
-  // Итог
-  const okSup = supSet.size>0;
-  const okCity = citySet.size>0;
-  const okQty = (offersWithQty>0) || (itemsWithItemQty>0);
-  els.summary.innerHTML = okSup && okCity && okQty
-    ? `<span class="ok">OK</span> — в мастере есть поставщики, города и остатки (qty).`
-    : `<span class="warn">Внимание</span> — чего-то не хватает: поставщики=${okSup?'есть':'нет'}, города=${okCity?'есть':'нет'}, остатки=${okQty?'есть':'нет'}.`;
+  els.invOnly.innerHTML = invOnly.length?invOnly.map(x=>`<span class="chip">${x}</span>`).join(''):'<span class="muted">—</span>';
+  els.masterNoOffers.innerHTML = masterNoOffers.length?masterNoOffers.map(x=>`<span class="chip">${x}</span>`).join(''):'<span class="muted">—</span>';
 
-  // Проблемы
-  const uniqProblems = [...new Set(problems)].slice(0,10);
-  els.problems.innerHTML = uniqProblems.length ? uniqProblems.map(p=>`<li>${p}</li>`).join('') : '<li class="muted">Нет</li>';
+  const covered = [...masterCodes].filter(x=>invCodes.has(x)).length;
+  els.coverage.textContent = `${covered} / ${masterCodes.size} (${masterCodes.size?Math.round(covered/masterCodes.size*100):0}%)`;
 
-  // Первый элемент
-  els.first.textContent = items.length ? JSON.stringify(items[0],null,2) : '(пусто)';
+  els.summary.innerHTML = (offersTotal>0 && supSet.size>0 && citySet.size>0)
+    ? '<span class="ok">OK</span> — inventory даёт предложения/остатки'
+    : '<span class="warn">Нужно проверить inventory: нет предложений/поставщиков/городов</span>';
+
+  els.firstOffer.textContent = first?JSON.stringify(first,null,2):'(пусто)';
 })();
 </script>
 </body>
