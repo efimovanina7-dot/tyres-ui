@@ -1,0 +1,14 @@
+[
+  {
+    "code": "TST-2257017-1",
+    "offers": [
+      { "supplier": "Север Авто", "warehouse_city": "Волгоград", "qty": 700, "price": 1000, "retail": 1000, "vendor_code": "81349", "updated": "2025-10-21 09:02" }
+    ]
+  },
+  {
+    "code": "TST-1857014-2",
+    "offers": [
+      { "supplier": "Мосавтошина", "warehouse_city": "Москва", "qty": 7, "price": 3370, "retail": 3370, "vendor_code": "1236301", "updated": "2025-08-27 01:09" }
+    ]
+  }
+]
