@@ -38,7 +38,7 @@
     .filtersBox .inline>*{flex:1}
     .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .hint{font-size:12px;color:var(--muted);margin-top:6px}
-    .searchline{display:flex;gap:8px}
+    .badgeRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
   </style>
 </head>
 <body>
@@ -92,14 +92,14 @@
 
           <div>
             <label>Город склада(ов)</label>
-            <div class="searchline"><input id="cityQ" type="text" placeholder="поиск по городу…"/><button class="btn" id="cityClr">×</button></div>
+            <div class="inline"><input id="cityQ" type="text" placeholder="поиск по городу…"/><button class="btn" id="cityClr">×</button></div>
             <select id="cities" multiple></select>
             <div class="hint" id="cityCount">—</div>
           </div>
 
           <div>
             <label>Поставщик(и)</label>
-            <div class="searchline"><input id="supQ" type="text" placeholder="поиск по поставщику…"/><button class="btn" id="supClr">×</button></div>
+            <div class="inline"><input id="supQ" type="text" placeholder="поиск по поставщику…"/><button class="btn" id="supClr">×</button></div>
             <select id="suppliers" multiple></select>
             <div class="hint" id="supCount">—</div>
           </div>
@@ -150,7 +150,7 @@
 </div>
 
 <script>
-const DATA_URL = 'data/master.json'; // относительно docs/
+const DATA_URL = 'data/master.json';
 
 const $ = id => document.getElementById(id);
 const els = {
@@ -183,19 +183,9 @@ function parseSizeAny(rec){
   }
   return {w:S(w),h:S(h),d:S(d)};
 }
-function findBigArray(obj, depth=0, best={len:0, arr:null}, path='root'){
-  if(depth>4||!obj) return best;
-  if(Array.isArray(obj)&&obj.length>0&&typeof obj[0]==='object'){ if(obj.length>best.len) best={len:obj.length,arr:obj}; }
-  else if(typeof obj==='object'){ for(const v of Object.values(obj)){ best = findBigArray(v, depth+1, best); } }
-  return best;
-}
-function fillSelect(sel, values){
-  const old = new Set([...sel.selectedOptions].map(o=>o.value));
-  sel.innerHTML='';
-  const empty=document.createElement('option'); empty.value=''; empty.textContent='—'; sel.appendChild(empty);
-  for(const v of values){ const op=document.createElement('option'); op.value=v; op.textContent=v; if(old.has(v)) op.selected=true; sel.appendChild(op); }
-}
-function fillMulti(sel, arr){ const prev = new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; for(const v of arr){ const o=document.createElement('option'); o.value=v; o.textContent=v; if(prev.has(v)) o.selected=true; sel.appendChild(o); } }
+function findBigArray(obj, depth=0, best={len:0, arr:null}){ if(depth>4||!obj)return best; if(Array.isArray(obj)&&obj.length&&typeof obj[0]==='object'){ if(obj.length>best.len) best={len:obj.length,arr:obj}; } else if(typeof obj==='object'){ for(const v of Object.values(obj)) best=findBigArray(v,depth+1,best); } return best; }
+function fillSelect(sel, values){ const old=new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; const empty=document.createElement('option'); empty.value=''; empty.textContent='—'; sel.appendChild(empty); for(const v of values){ const op=document.createElement('option'); op.value=v; op.textContent=v; if(old.has(v)) op.selected=true; sel.appendChild(op); } }
+function fillMulti(sel, arr){ const prev=new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; for(const v of arr){ const o=document.createElement('option'); o.value=v; o.textContent=v; if(prev.has(v)) o.selected=true; sel.appendChild(o); } }
 
 let ITEMS=[], FILTERED=[], LAST_ROWS=[];
 let SUP_TO_CITIES=new Map(), CITY_TO_SUPS=new Map();
@@ -234,7 +224,9 @@ async function loadData(){
         service_code:S(get(s,'service_code','svc','service')),
         delivery:S(get(s,'delivery','availability','in_stock')) || (getNum(s,'qty','quantity','stock','rest')>0?'В наличии':'—')
       }));
-      return {id,brand,model,w,h,d,country,season,spikes,runflat,cargo,mt,at,xl,img,suppliers,raw:it};
+      // запомним возможный qty на уровне товара (fallback)
+      const itemQty = getNum(it,'quantity','qty','stock','rest');
+      return {id,brand,model,w,h,d,country,season,spikes,runflat,cargo,mt,at,xl,img,suppliers,itemQty,raw:it};
     });
 
     const widths=[],heights=[],diams=[],brands=[],countries=[],cities=[],sups=[];
@@ -315,7 +307,7 @@ function applyFilters(){
     if(mt && !it.mt) continue; if(at && !it.at) continue; if(xl && !it.xl) continue;
     if(modelQ && !(`${it.model} ${it.id}`.toLowerCase().includes(modelQ))) continue;
 
-    let totalQty=0; const offers=[];
+    let sumQty = 0; const offers=[];
     for(const s of it.suppliers){
       if(selCities.size>0 && !selCities.has(s.city)) continue;
       if(selSups.size>0 && !selSups.has(s.supplier)) continue;
@@ -325,32 +317,36 @@ function applyFilters(){
       if(vendorSku && !S(s.vendor_code).toLowerCase().includes(vendorSku)) continue;
       if(serviceCode && !S(s.service_code).toLowerCase().includes(serviceCode)) continue;
       if(availableOnly && !(s.qty>0)) continue;
-      totalQty += s.qty||0;
+      sumQty += s.qty||0;
       offers.push(s);
     }
-    if(minTotal && totalQty<minTotal) continue;
-    if(offers.length===0) continue;
+
+    // если предложений нет/qty==0, но на уровне товара есть quantity — используем его как fallback
+    const baseQty = it.itemQty || 0;
+    const totalQty = (sumQty>0 ? sumQty : baseQty);
+
+    if(minTotal && totalQty < minTotal) continue;
+    if(offers.length===0 && totalQty===0) continue;
 
     if(q){ const hay = `${it.id} ${it.brand} ${it.model} ${it.w}/${it.h} R${it.d}`.toLowerCase(); if(!hay.includes(q)) continue; }
 
-    const best = [...offers].sort((a,b)=>a.price-b.price)[0];
+    const best = offers.length ? [...offers].sort((a,b)=>a.price-b.price)[0] : null;
     const supSet = uniq(offers.map(o=>o.supplier));
     out.push({
       it, offers, totalQty,
       agg:{
-        minPrice: Math.min(...offers.map(o=>o.price||Infinity)),
+        minPrice: offers.length ? Math.min(...offers.map(o=>o.price||Infinity)) : '',
         maxUpdated: (offers.map(o=>Date.parse(o.updated)).filter(x=>x>0).sort((a,b)=>b-a)[0])||0,
-        anyRetail: offers.find(o=>o.retail>0)?.retail||'',
         bestCity: best?.city || '',
         supList: supSet.slice(0,3).join(', ') + (supSet.length>3 ? ` +${supSet.length-3}` : '')
       }
     });
   }
 
-  if(sort==='price_desc') out.sort((a,b)=>(b.agg.minPrice||1e15)-(a.agg.minPrice||1e15));
+  if(sort==='price_desc') out.sort((a,b)=>( (b.agg.minPrice||1e15) - (a.agg.minPrice||1e15) ));
   else if(sort==='updated_desc') out.sort((a,b)=>b.agg.maxUpdated-a.agg.maxUpdated);
   else if(sort==='qty_desc') out.sort((a,b)=>b.totalQty-a.totalQty);
-  else out.sort((a,b)=>(a.agg.minPrice||1e15)-(b.agg.minPrice||1e15));
+  else out.sort((a,b)=>( (a.agg.minPrice||1e15) - (b.agg.minPrice||1e15) ));
 
   FILTERED=out; els.found.textContent=FILTERED.length;
   renderPage(1,pageSize);
@@ -362,13 +358,18 @@ function renderPage(page,pageSize){
   LAST_ROWS=[];
 
   const html = slice.map(row=>{
-    const it=row.it, a=row.agg;
-    LAST_ROWS.push({offer_id:it.id,brand:it.brand,model:it.model,size:`${it.w}/${it.h} R${it.d}`,min_price:a.minPrice||'',total_qty:row.totalQty,suppliers:a.supList,best_city:a.bestCity});
+    const it=row.it, a=row.agg, qty=row.totalQty;
+    LAST_ROWS.push({offer_id:it.id,brand:it.brand,model:it.model,size:`${it.w}/${it.h} R${it.d}`,quantity:qty,min_price:a.minPrice||'',suppliers:a.supList,best_city:a.bestCity});
     return `
     <div class="row">
       <div><img class="img" src="${esc(it.img||'')}" onerror="this.style.opacity=.15" alt=""></div>
       <div>
         <div style="font-weight:600">${esc(it.brand||'')} ${esc(it.model||'')}</div>
+        <div class="badgeRow">
+          <span class="pill">Общий остаток: <b>${qty}</b> шт.</span>
+          ${a.minPrice ? `<span class="pill">Мин. опт: <b>${fmt(a.minPrice)}</b></span>` : ''}
+          ${a.bestCity ? `<span class="pill">Город: ${esc(a.bestCity)}</span>` : ''}
+        </div>
         <div class="kvs" style="margin-top:6px">
           <b>Код</b><div><code>${esc(it.id||'')}</code></div>
           <b>Типоразмер</b><div>${esc(`${it.w||'?'}/${it.h||'?'} R${it.d||'?'}`)}</div>
@@ -424,8 +425,10 @@ function fmt(x){ return Intl.NumberFormat('ru-RU').format(Math.round(x))+' ₽';
 function esc(s){ return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function downloadCSV(){
-  const header=['offer_id','brand','model','size','min_price','total_qty','suppliers','best_city'];
-  const lines=[header.join(',')].concat(LAST_ROWS.map(r=>[r.offer_id,r.brand,`"${r.model.replace(/"/g,'""')}"`,r.size,r.min_price,r.total_qty,`"${r.suppliers.replace(/"/g,'""')}"`,`"${r.best_city.replace(/"/g,'""')}"`].join(',')));
+  const header=['offer_id','brand','model','size','quantity','min_price','suppliers','best_city'];
+  const lines=[header.join(',')].concat(
+    LAST_ROWS.map(r=>[r.offer_id,r.brand,`"${r.model.replace(/"/g,'""')}"`,r.size,r.quantity,r.min_price,`"${r.suppliers.replace(/"/g,'""')}"`,`"${r.best_city.replace(/"/g,'""')}"`].join(','))
+  );
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}); const url=URL.createObjectURL(blob);
   const a=Object.assign(document.createElement('a'),{href:url,download:'tyres_selection.csv'}); document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
