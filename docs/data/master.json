@@ -1,0 +1,22 @@
+[
+  {
+    "offer_id": "TST-2257017-1",
+    "brand": "Dunlop",
+    "model": "Grandtrek AT3",
+    "size": "225/70 R17",
+    "season": "летняя",
+    "suppliers": [
+      { "supplier": "Север Авто", "warehouse_city": "Волгоград", "qty": 700, "price": 1000, "retail": 1000, "vendor_code": "81349", "updated": "2025-10-21 09:02" }
+    ]
+  },
+  {
+    "offer_id": "TST-1857014-2",
+    "brand": "DoubleStar",
+    "model": "DW02",
+    "size": "185/70 R14",
+    "season": "зимняя",
+    "suppliers": [
+      { "supplier": "Мосавтошина", "warehouse_city": "Москва", "qty": 7, "price": 3370, "retail": 3370, "vendor_code": "1236301", "updated": "2025-08-27 01:09" }
+    ]
+  }
+]
