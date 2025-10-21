@@ -1,0 +1,31 @@
+name: Sync inventory.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "URL файла с остатками (offers)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch inventory.json
+        run: |
+          set -e
+          mkdir -p docs/data
+          curl -fsSL "${{ github.event.inputs.source_url }}" -o docs/data/inventory.json
+          ls -lh docs/data/inventory.json
+      - name: Commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/inventory.json
+          git commit -m "sync: update inventory.json" || echo "no changes"
+          git push
