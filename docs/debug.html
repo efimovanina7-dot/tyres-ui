@@ -2,58 +2,132 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Диагностика master.json</title>
+<title>Диагностика master.json — поставщики/города/остатки</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ok:#86efac;--bad:#fca5a5}
+  :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ok:#86efac;--bad:#fca5a5;--warn:#facc15}
   body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
   .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
   .card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 4px 24px rgba(0,0,0,.25);margin-bottom:16px}
   code,pre{font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
-  .kv{display:grid;grid-template-columns:220px 1fr;gap:8px}
+  .kv{display:grid;grid-template-columns:260px 1fr;gap:8px}
   .kv div:first-child{color:var(--muted)}
-  .ok{color:var(--ok)} .bad{color:var(--bad)}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{border:1px solid #223049;background:#0b1322;padding:4px 8px;border-radius:999px}
+  .muted{color:var(--muted)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Диагностика master.json</h1>
+
   <div class="card">
     <div class="kv">
-      <div>URL</div><div><code id="url"></code></div>
-      <div>HTTP</div><div id="status">—</div>
-      <div>Items</div><div id="items">—</div>
-      <div>Поставщики</div><div id="sups">—</div>
-      <div>Города</div><div id="cities">—</div>
+      <div>Попытка 1 (предпочтительно)</div><div><code id="url1">data/master.json</code></div>
+      <div>Попытка 2 (fallback)</div><div><code id="url2">master.json</code> <span class="muted">(если первый путь 404)</span></div>
+      <div>Статус загрузки</div><div id="status">—</div>
+      <div>Количество товаров (items)</div><div id="items">—</div>
+      <div>Всего предложений (offers)</div><div id="offers">—</div>
+      <div>Уникальных поставщиков</div><div id="supCount">—</div>
+      <div>Уникальных городов</div><div id="cityCount">—</div>
+      <div>Offers с qty &gt; 0</div><div id="qtyOffers">—</div>
+      <div>Товаров с quantity на уровне товара</div><div id="qtyItems">—</div>
+      <div>Итог проверки</div><div id="summary">—</div>
     </div>
   </div>
+
   <div class="card">
-    <h3>Первый элемент</h3>
+    <h3>Примеры значений</h3>
+    <div class="chips" id="supChips"></div>
+    <div class="chips" id="cityChips" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Проблемные строки (первые 10)</h3>
+    <ul id="problems"><li class="muted">Нет</li></ul>
+  </div>
+
+  <div class="card">
+    <h3>Первый элемент из массива</h3>
     <pre id="first">—</pre>
   </div>
 </div>
 <script>
-const URL_ = 'data/master.json';
-const els={url:document.getElementById('url'),status:status,items:items,sups:sups,cities:cities,first:first};
-els.url.textContent=URL_;
+const PATHS = ['data/master.json','master.json']; // второй — на случай старой структуры
+const els = Object.fromEntries(['status','items','offers','supCount','cityCount','qtyOffers','qtyItems','summary','supChips','cityChips','problems','first'].map(id=>[id,document.getElementById(id)]));
+
 function bigArr(o,d=0,b={len:0,arr:null}){if(d>4||!o)return b;if(Array.isArray(o)&&o.length&&typeof o[0]==='object'){if(o.length>b.len)b={len:o.length,arr:o};}else if(typeof o==='object'){for(const v of Object.values(o))b=bigArr(v,d+1,b);}return b;}
+const S=v=>v==null?'':String(v);
+const N=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const get=(o,...ks)=>{for(const k of ks){if(o&&typeof o==='object'&&o[k]!=null&&S(o[k])!=='')return o[k]}return''};
+const getNum=(o,...ks)=>N(get(o,...ks));
+
 (async()=>{
-  try{
-    const r=await fetch(URL_+'?t='+Date.now(),{cache:'no-store'}); els.status.innerHTML=r.ok?'<span class="ok">OK</span>':'<span class="bad">'+r.status+'</span>';
-    const data=await r.json(); let items=Array.isArray(data)?data:null; if(!items){ for(const k of ['items','data','result','products']) if(Array.isArray(data?.[k])){ items=data[k]; break; } }
-    if(!items||!items.length) items=bigArr(data).arr||[];
-    els.items.textContent=items.length;
-    const supSet=new Set(), citySet=new Set();
-    for(const it of items){
-      const list=Array.isArray(it.suppliers)?it.suppliers:(it.supplier||it.supplier_name||it.vendor||it.provider?[it]:[]);
-      for(const s of list){ if(s.supplier||s.supplier_name||s.vendor||s.provider) supSet.add(s.supplier||s.supplier_name||s.vendor||s.provider);
-        if(s.warehouse_city||s.city||s.warehouseCity) citySet.add(s.warehouse_city||s.city||s.warehouseCity);
-      }
+  let data=null, lastErr=null, urlUsed=null, httpText='';  
+  for(const p of PATHS){
+    try{
+      const r = await fetch(p+'?t='+Date.now(),{cache:'no-store'});
+      httpText += `${p}: ${r.status}  `;
+      if(!r.ok) { lastErr = new Error('HTTP '+r.status); continue; }
+      data = await r.json(); urlUsed=p; break;
+    }catch(e){ lastErr=e; }
+  }
+  els.status.innerHTML = data ? `<span class="ok">OK</span> (${urlUsed})` : `<span class="bad">Ошибка</span> ${lastErr?lastErr.message:''} [${httpText}]`;
+  if(!data){ return; }
+
+  let items = Array.isArray(data)?data:null;
+  if(!items){ for(const k of ['items','data','result','products']) if(Array.isArray(data?.[k])){ items=data[k]; break; } }
+  if(!items || !items.length){ items = bigArr(data).arr || []; }
+
+  els.items.textContent = items.length;
+
+  // Собираем метрики
+  let offersTotal=0, offersWithQty=0, itemsWithItemQty=0;
+  const supSet=new Set(), citySet=new Set();
+  const problems=[];
+
+  for(const it of items){
+    let offers = Array.isArray(it.suppliers) ? it.suppliers : (S(get(it,'supplier','supplier_name','vendor','provider')) ? [it] : []);
+    if(!offers.length){ problems.push('Товар без массива suppliers'); }
+    offersTotal += offers.length;
+    for(const s of offers){
+      const sup = S(get(s,'supplier','supplier_name','vendor','provider'));
+      const city = S(get(s,'warehouse_city','city','warehouseCity'));
+      const qty  = getNum(s,'qty','quantity','stock','rest');
+      if(sup) supSet.add(sup); else problems.push('Offer без имени поставщика');
+      if(city) citySet.add(city); else problems.push('Offer без города склада');
+      if(qty>0) offersWithQty++;
+      if(qty===0) problems.push('Offer без количества (qty=0 или пусто)');
     }
-    els.sups.textContent=[...supSet].slice(0,10).join(', ')||'(нет)';
-    els.cities.textContent=[...citySet].slice(0,10).join(', ')||'(нет)';
-    els.first.textContent=items.length?JSON.stringify(items[0],null,2):'(пусто)';
-  }catch(e){ els.status.innerHTML='<span class="bad">ERR</span>'; els.first.textContent=String(e); }
+    const itemQty = getNum(it,'quantity','qty','stock','rest');
+    if(itemQty>0) itemsWithItemQty++;
+  }
+
+  els.offers.textContent   = offersTotal;
+  els.qtyOffers.textContent= offersWithQty;
+  els.qtyItems.textContent = itemsWithItemQty;
+  els.supCount.textContent = `${supSet.size} шт.`;
+  els.cityCount.textContent= `${citySet.size} шт.`;
+
+  // Вывод чипсов
+  els.supChips.innerHTML  = '<b style="margin-right:6px">Поставщики:</b>'+ [...supSet].slice(0,15).map(x=>`<span class="chip">${x}</span>`).join('') || '<span class="muted">нет</span>';
+  els.cityChips.innerHTML = '<b style="margin-right:6px">Города:</b>'+ [...citySet].slice(0,15).map(x=>`<span class="chip">${x}</span>`).join('') || '<span class="muted">нет</span>';
+
+  // Итог
+  const okSup = supSet.size>0;
+  const okCity = citySet.size>0;
+  const okQty = (offersWithQty>0) || (itemsWithItemQty>0);
+  els.summary.innerHTML = okSup && okCity && okQty
+    ? `<span class="ok">OK</span> — в мастере есть поставщики, города и остатки (qty).`
+    : `<span class="warn">Внимание</span> — чего-то не хватает: поставщики=${okSup?'есть':'нет'}, города=${okCity?'есть':'нет'}, остатки=${okQty?'есть':'нет'}.`;
+
+  // Проблемы
+  const uniqProblems = [...new Set(problems)].slice(0,10);
+  els.problems.innerHTML = uniqProblems.length ? uniqProblems.map(p=>`<li>${p}</li>`).join('') : '<li class="muted">Нет</li>';
+
+  // Первый элемент
+  els.first.textContent = items.length ? JSON.stringify(items[0],null,2) : '(пусто)';
 })();
 </script>
 </body>
