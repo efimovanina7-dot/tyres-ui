@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Проверка соответствий: master.json ↔ фильтры + inventory.json</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ok:#86efac;--bad:#fca5a5;--warn:#facc15}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe UI,Roboto,Arial}
+.wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+.card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 4px 24px rgba(0,0,0,.25);margin-bottom:16px}
+h1{margin:0 0 10px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 10px;border-bottom:1px solid #1f2937;text-align:left;vertical-align:top}
+th{color:#94a3b8}
+.ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+.kv{display:grid;grid-template-columns:260px 1fr;gap:8px}
+.kv div:first-child{color:#94a3b8}
+code{font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid #223049;background:#0b1322;padding:4px 8px;border-radius:999px}
+small{color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Проверка соответствий полей</h1>
+
+  <div class="card">
+    <div class="kv">
+      <div>master.json</div><div id="mStatus">—</div>
+      <div>inventory.json</div><div id="iStatus">—</div>
+      <div>mapping.json</div><div id="mapStatus">—</div>
+      <div>Товаров (master)</div><div id="mCount">—</div>
+      <div>Записей inventory</div><div id="iCount">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Соответствия мастер → фильтры (товарные поля)</h3>
+    <table id="prodTbl">
+      <thead>
+        <tr>
+          <th>Фильтр</th>
+          <th>Ключи из mapping.json</th>
+          <th>Непусто</th>
+          <th>Примеры значений</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <small>Ожидается, что для твоего мастера заполнятся: brand=<code>p_brand</code>, model=<code>p_model</code>, width/height/diameter=<code>p_width/p_height/p_diameter</code> (или парс из <code>p_full_name</code>).</small>
+  </div>
+
+  <div class="card">
+    <h3>Соответствия inventory → предложения (офферы)</h3>
+    <table id="offerTbl">
+      <thead>
+        <tr>
+          <th>Поле оффера</th>
+          <th>Ключи из mapping.json</th>
+          <th>Непусто</th>
+          <th>Примеры значений</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="iHint" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+const MASTER='data/master.json', INV='data/inventory.json', MAP='data/mapping.json';
+const S=v=>v==null?'':String(v), N=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const pick=(obj,keys)=>{for(const k of (keys||[])){let cur=obj,ok=true;for(const p of k.split('.')){if(cur&&typeof cur==='object'&&cur[p]!=null&&cur[p]!=='' ){cur=cur[p]}else{ok=false;break}}if(ok&&cur!==''&&cur!=null)return cur}return''};
+const parseSize=t=>{if(!t)return['','',''];const m=String(t).match(/(\d{3})\s*\/\s*(\d{2})[^0-9]*R?\s*([0-9]{2})/i);return m?[m[1],m[2],m[3]]:['','','']};
+
+function percent(n,tot){return tot? Math.round(n/tot*100):0}
+function sample(arr, n=6){const s=[...new Set(arr.filter(x=>S(x)!=''))]; return s.slice(0,n) }
+
+async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json() }
+
+(async()=>{
+  const mStat=document.getElementById('mStatus'), iStat=document.getElementById('iStatus'), mapStat=document.getElementById('mapStatus');
+  const mCount=document.getElementById('mCount'), iCount=document.getElementById('iCount');
+  const prodT=document.querySelector('#prodTbl tbody'), offerT=document.querySelector('#offerTbl tbody'), iHint=document.getElementById('iHint');
+
+  let master=null, inv=null, map=null;
+  try{ master=await loadJSON(MASTER); mStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ mStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
+  try{ inv=await loadJSON(INV); iStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ iStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
+  try{ map=await loadJSON(MAP); mapStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ mapStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
+
+  const mArr = Array.isArray(master)?master:(Array.isArray(master?.items)?master.items:(Array.isArray(master?.data)?master.data:[]));
+  mCount.textContent = mArr.length;
+
+  // ---- ПРОДУКТОВЫЕ ПОЛЯ (мастер) ----
+  const prodMap = map?.product || {};
+  const checks = [
+    ['brand',['brand','p_brand']],
+    ['model',['model','p_model']],
+    ['width',['width','p_width','section_width']],
+    ['height',['height','p_height','aspect_ratio']],
+    ['diameter',['diameter','p_diameter','rim_diameter']],
+    ['season',['season','p_season','season_id']],
+    ['country',['country','made_in']],
+    ['size_text',['size','p_full_name','dimension','title','attrs.title']]
+  ];
+  for(const [field, defaults] of checks){
+    const keys = prodMap[field] && prodMap[field].length ? prodMap[field] : defaults;
+    let filled=0, values=[];
+    for(const it of mArr.slice(0,5000)){ // достаточно для оценки
+      let v = pick(it, keys);
+      if(!v && field==='width' || field==='height' || field==='diameter'){
+        const [w,h,d]=parseSize(pick(it, prodMap['size_text']||['p_full_name','size','title']));
+        v = {'width':w,'height':h,'diameter':d}[field];
+      }
+      if(S(v)!==''){ filled++; values.push(v); }
+    }
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td><b>${field}</b></td><td><code>${keys.join('</code>, <code>')}</code></td><td>${filled} / ${mArr.length} (${percent(filled,mArr.length)}%)</td><td>${sample(values).map(v=>`<span class="chip">${S(v)}</span>`).join(' ')||'—'}</td>`;
+    prodT.appendChild(tr);
+  }
+
+  // ---- ИНВЕНТАРЬ / ОФФЕРЫ ----
+  const oMap = map?.offer || {};
+  let invList = inv;
+  if(invList && !Array.isArray(invList) && typeof invList==='object' && !Array.isArray(invList.items)){
+    // формат {tires:[...], wheels:[...]} — это НЕ офферы, это еще один каталог
+    const keys = Object.keys(invList);
+    iCount.textContent = keys.length;
+    iHint.innerHTML = `<span class="warn">inventory.json выглядит как разделы каталога (${keys.join(', ')}), а не список офферов. Для фильтров "Поставщик/Город/Qty/Цена" нужен формат: [{"code":"...","offers":[{ "supplier":"...","city":"...","qty":10,"price":1234 }]}].</span>`;
+  } else {
+    const entries = Array.isArray(invList) ? invList : (Array.isArray(invList?.items)?invList.items:[]);
+    iCount.textContent = entries.length;
+    const keysToCheck = [
+      ['code', oMap.code || ['code','offer_id','article','id','sku','product_code','p_code']],
+      ['supplier', oMap.supplier || ['supplier','supplier_name','vendor','provider']],
+      ['city', oMap.city || ['warehouse_city','city','warehouseCity']],
+      ['qty', oMap.qty || ['qty','quantity','stock','rest']],
+      ['price', oMap.price || ['price','cost','opt_price','wholesale']]
+    ];
+    // Превратим в поток офферов
+    let offers=[];
+    for(const rec of entries){
+      const code = pick(rec, keysToCheck[0][1]);
+      let list = Array.isArray(rec.offers) ? rec.offers
+               : Array.isArray(rec.suppliers) ? rec.suppliers
+               : Array.isArray(rec.proposals) ? rec.proposals
+               : (pick(rec, oMap.supplier||['supplier','supplier_name']) ? [rec] : []);
+      if(!list) continue;
+      for(const s of list){ offers.push({code, raw:s}); }
+    }
+    const total=offers.length;
+    const row = (title, keys) => {
+      let filled=0, vals=[];
+      for(const o of offers.slice(0,5000)){ const v = title==='code' ? o.code : pick(o.raw, keys); if(S(v)!==''){filled++; vals.push(v);} }
+      const tr=document.createElement('tr');
+      tr.innerHTML = `<td><b>${title}</b></td><td><code>${keys.join('</code>, <code>')}</code></td><td>${filled} / ${total} (${percent(filled,total)}%)</td><td>${sample(vals).map(v=>`<span class="chip">${S(v)}</span>`).join(' ')||'—'}</td>`;
+      offerT.appendChild(tr);
+    };
+    row('code', keysToCheck[0][1]);
+    row('supplier', keysToCheck[1][1]);
+    row('city', keysToCheck[2][1]);
+    row('qty', keysToCheck[3][1]);
+    row('price', keysToCheck[4][1]);
+    if(total===0){
+      iHint.innerHTML = `<span class="warn">В inventory не найдено массива офферов (offers/suppliers/proposals) и нет плоских записей с полями supplier/city/qty/price.</span>`;
+    }
+  }
+})();
+</script>
+</body>
+</html>
