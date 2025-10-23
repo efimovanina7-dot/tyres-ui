@@ -49,7 +49,7 @@ small{color:#94a3b8}
       </thead>
       <tbody></tbody>
     </table>
-    <small>Ожидается, что для твоего мастера заполнятся: brand=<code>p_brand</code>, model=<code>p_model</code>, width/height/diameter=<code>p_width/p_height/p_diameter</code> (или парс из <code>p_full_name</code>).</small>
+    <small>Ожидается для вашего мастера: brand=<code>p_brand</code>, model=<code>p_model</code>, width/height/diameter=<code>p_width/p_height/p_diameter</code> (или парс из <code>p_full_name</code>).</small>
   </div>
 
   <div class="card">
@@ -74,10 +74,9 @@ const MASTER='data/master.json', INV='data/inventory.json', MAP='data/mapping.js
 const S=v=>v==null?'':String(v), N=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
 const pick=(obj,keys)=>{for(const k of (keys||[])){let cur=obj,ok=true;for(const p of k.split('.')){if(cur&&typeof cur==='object'&&cur[p]!=null&&cur[p]!=='' ){cur=cur[p]}else{ok=false;break}}if(ok&&cur!==''&&cur!=null)return cur}return''};
 const parseSize=t=>{if(!t)return['','',''];const m=String(t).match(/(\d{3})\s*\/\s*(\d{2})[^0-9]*R?\s*([0-9]{2})/i);return m?[m[1],m[2],m[3]]:['','','']};
-
 function percent(n,tot){return tot? Math.round(n/tot*100):0}
 function sample(arr, n=6){const s=[...new Set(arr.filter(x=>S(x)!=''))]; return s.slice(0,n) }
-
+function biggestArray(o,depth=0,best={len:0,arr:[]}){ if(!o||depth>5) return best; if(Array.isArray(o) && o.length && typeof o[0]==='object'){ if(o.length>best.len) best={len:o.length,arr:o}; return best; } if(typeof o==='object'){ for(const v of Object.values(o)) best=biggestArray(v,depth+1,best); } return best; }
 async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json() }
 
 (async()=>{
@@ -90,28 +89,35 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
   try{ inv=await loadJSON(INV); iStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ iStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
   try{ map=await loadJSON(MAP); mapStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ mapStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
 
-  const mArr = Array.isArray(master)?master:(Array.isArray(master?.items)?master.items:(Array.isArray(master?.data)?master.data:[]));
+  // ---------- MASTER: ищем массив в популярных ключах + fallback на самый большой массив ----------
+  let mArr = Array.isArray(master) ? master : null;
+  if(!mArr){
+    const keys=['items','data','result','products'];
+    for(const k of keys){ if(Array.isArray(master?.[k])){ mArr=master[k]; break; } }
+  }
+  if(!mArr){
+    mArr = biggestArray(master).arr || [];
+  }
   mCount.textContent = mArr.length;
 
   // ---- ПРОДУКТОВЫЕ ПОЛЯ (мастер) ----
   const prodMap = map?.product || {};
   const checks = [
-    ['brand',['brand','p_brand']],
-    ['model',['model','p_model']],
-    ['width',['width','p_width','section_width']],
-    ['height',['height','p_height','aspect_ratio']],
-    ['diameter',['diameter','p_diameter','rim_diameter']],
-    ['season',['season','p_season','season_id']],
-    ['country',['country','made_in']],
-    ['size_text',['size','p_full_name','dimension','title','attrs.title']]
+    ['brand',   prodMap.brand   && prodMap.brand.length   ? prodMap.brand   : ['brand','p_brand']],
+    ['model',   prodMap.model   && prodMap.model.length   ? prodMap.model   : ['model','p_model']],
+    ['width',   prodMap.width   && prodMap.width.length   ? prodMap.width   : ['width','p_width','section_width']],
+    ['height',  prodMap.height  && prodMap.height.length  ? prodMap.height  : ['height','p_height','aspect_ratio']],
+    ['diameter',prodMap.diameter&& prodMap.diameter.length? prodMap.diameter: ['diameter','p_diameter','rim_diameter']],
+    ['season',  prodMap.season  && prodMap.season.length  ? prodMap.season  : ['season','p_season','season_id']],
+    ['country', prodMap.country && prodMap.country.length ? prodMap.country : ['country','made_in']],
+    ['size_text',prodMap.size_text&&prodMap.size_text.length?prodMap.size_text:['size','p_full_name','dimension','title','attrs.title']]
   ];
-  for(const [field, defaults] of checks){
-    const keys = prodMap[field] && prodMap[field].length ? prodMap[field] : defaults;
+  for(const [field, keys] of checks){
     let filled=0, values=[];
-    for(const it of mArr.slice(0,5000)){ // достаточно для оценки
+    for(const it of mArr.slice(0,5000)){ // для оценки хватит части
       let v = pick(it, keys);
-      if(!v && field==='width' || field==='height' || field==='diameter'){
-        const [w,h,d]=parseSize(pick(it, prodMap['size_text']||['p_full_name','size','title']));
+      if((field==='width'||field==='height'||field==='diameter') && !v){
+        const [w,h,d]=parseSize(pick(it, prodMap.size_text||['p_full_name','size','title']));
         v = {'width':w,'height':h,'diameter':d}[field];
       }
       if(S(v)!==''){ filled++; values.push(v); }
@@ -121,48 +127,44 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
     prodT.appendChild(tr);
   }
 
-  // ---- ИНВЕНТАРЬ / ОФФЕРЫ ----
+  // ---------- INVENTORY ----------
   const oMap = map?.offer || {};
   let invList = inv;
+  // формат {section: [...] } — это каталог (типы), а не офферы
   if(invList && !Array.isArray(invList) && typeof invList==='object' && !Array.isArray(invList.items)){
-    // формат {tires:[...], wheels:[...]} — это НЕ офферы, это еще один каталог
     const keys = Object.keys(invList);
     iCount.textContent = keys.length;
-    iHint.innerHTML = `<span class="warn">inventory.json выглядит как разделы каталога (${keys.join(', ')}), а не список офферов. Для фильтров "Поставщик/Город/Qty/Цена" нужен формат: [{"code":"...","offers":[{ "supplier":"...","city":"...","qty":10,"price":1234 }]}].</span>`;
+    iHint.innerHTML = `<span class="warn">inventory.json выглядит как разделы каталога (${keys.join(', ')}), а не список офферов. Для фильтров "Поставщик/Город/Qty/Цена" нужен формат: [{"code":"...","offers":[{"supplier":"...","city":"...","qty":10,"price":1234}]}].</span>`;
   } else {
     const entries = Array.isArray(invList) ? invList : (Array.isArray(invList?.items)?invList.items:[]);
     iCount.textContent = entries.length;
-    const keysToCheck = [
+
+    // плоский поток офферов
+    let offers=[];
+    for(const rec of entries){
+      const code = pick(rec, oMap.code || ['code','offer_id','article','id','sku','product_code','p_code']);
+      let list = Array.isArray(rec.offers) ? rec.offers
+               : Array.isArray(rec.suppliers) ? rec.suppliers
+               : Array.isArray(rec.proposals) ? rec.proposals
+               : (pick(rec, oMap.supplier||['supplier','supplier_name','vendor','provider']) ? [rec] : []);
+      if(!list) continue;
+      for(const s of list){ offers.push({code, raw:s}); }
+    }
+    const total=offers.length;
+    const rows = [
       ['code', oMap.code || ['code','offer_id','article','id','sku','product_code','p_code']],
       ['supplier', oMap.supplier || ['supplier','supplier_name','vendor','provider']],
       ['city', oMap.city || ['warehouse_city','city','warehouseCity']],
       ['qty', oMap.qty || ['qty','quantity','stock','rest']],
       ['price', oMap.price || ['price','cost','opt_price','wholesale']]
     ];
-    // Превратим в поток офферов
-    let offers=[];
-    for(const rec of entries){
-      const code = pick(rec, keysToCheck[0][1]);
-      let list = Array.isArray(rec.offers) ? rec.offers
-               : Array.isArray(rec.suppliers) ? rec.suppliers
-               : Array.isArray(rec.proposals) ? rec.proposals
-               : (pick(rec, oMap.supplier||['supplier','supplier_name']) ? [rec] : []);
-      if(!list) continue;
-      for(const s of list){ offers.push({code, raw:s}); }
-    }
-    const total=offers.length;
-    const row = (title, keys) => {
+    for(const [title, keys] of rows){
       let filled=0, vals=[];
       for(const o of offers.slice(0,5000)){ const v = title==='code' ? o.code : pick(o.raw, keys); if(S(v)!==''){filled++; vals.push(v);} }
       const tr=document.createElement('tr');
       tr.innerHTML = `<td><b>${title}</b></td><td><code>${keys.join('</code>, <code>')}</code></td><td>${filled} / ${total} (${percent(filled,total)}%)</td><td>${sample(vals).map(v=>`<span class="chip">${S(v)}</span>`).join(' ')||'—'}</td>`;
       offerT.appendChild(tr);
-    };
-    row('code', keysToCheck[0][1]);
-    row('supplier', keysToCheck[1][1]);
-    row('city', keysToCheck[2][1]);
-    row('qty', keysToCheck[3][1]);
-    row('price', keysToCheck[4][1]);
+    }
     if(total===0){
       iHint.innerHTML = `<span class="warn">В inventory не найдено массива офферов (offers/suppliers/proposals) и нет плоских записей с полями supplier/city/qty/price.</span>`;
     }
