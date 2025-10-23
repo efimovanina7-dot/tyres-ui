@@ -49,7 +49,7 @@ small{color:#94a3b8}
       </thead>
       <tbody></tbody>
     </table>
-    <small>Ожидается для вашего мастера: brand=<code>p_brand</code>, model=<code>p_model</code>, width/height/diameter=<code>p_width/p_height/p_diameter</code> (или парс из <code>p_full_name</code>).</small>
+    <small>Для вашего мастера: brand=<code>p_brand</code>, model=<code>p_model</code>, width/height/diameter=<code>p_width/p_height/p_diameter</code> (или парс из <code>p_full_name</code>).</small>
   </div>
 
   <div class="card">
@@ -89,18 +89,15 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
   try{ inv=await loadJSON(INV); iStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ iStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
   try{ map=await loadJSON(MAP); mapStat.innerHTML='<span class="ok">OK</span>'; }catch(e){ mapStat.innerHTML='<span class="bad">'+e.message+'</span>'; }
 
-  // ---------- MASTER: ищем массив в популярных ключах + fallback на самый большой массив ----------
+  // ---------- MASTER ----------
   let mArr = Array.isArray(master) ? master : null;
   if(!mArr){
     const keys=['items','data','result','products'];
     for(const k of keys){ if(Array.isArray(master?.[k])){ mArr=master[k]; break; } }
   }
-  if(!mArr){
-    mArr = biggestArray(master).arr || [];
-  }
+  if(!mArr){ mArr = biggestArray(master).arr || []; }
   mCount.textContent = mArr.length;
 
-  // ---- ПРОДУКТОВЫЕ ПОЛЯ (мастер) ----
   const prodMap = map?.product || {};
   const checks = [
     ['brand',   prodMap.brand   && prodMap.brand.length   ? prodMap.brand   : ['brand','p_brand']],
@@ -112,9 +109,10 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
     ['country', prodMap.country && prodMap.country.length ? prodMap.country : ['country','made_in']],
     ['size_text',prodMap.size_text&&prodMap.size_text.length?prodMap.size_text:['size','p_full_name','dimension','title','attrs.title']]
   ];
+
   for(const [field, keys] of checks){
     let filled=0, values=[];
-    for(const it of mArr.slice(0,5000)){ // для оценки хватит части
+    for(const it of mArr){ // <-- полный проход по всем 20k
       let v = pick(it, keys);
       if((field==='width'||field==='height'||field==='diameter') && !v){
         const [w,h,d]=parseSize(pick(it, prodMap.size_text||['p_full_name','size','title']));
@@ -130,16 +128,13 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
   // ---------- INVENTORY ----------
   const oMap = map?.offer || {};
   let invList = inv;
-  // формат {section: [...] } — это каталог (типы), а не офферы
   if(invList && !Array.isArray(invList) && typeof invList==='object' && !Array.isArray(invList.items)){
     const keys = Object.keys(invList);
     iCount.textContent = keys.length;
-    iHint.innerHTML = `<span class="warn">inventory.json выглядит как разделы каталога (${keys.join(', ')}), а не список офферов. Для фильтров "Поставщик/Город/Qty/Цена" нужен формат: [{"code":"...","offers":[{"supplier":"...","city":"...","qty":10,"price":1234}]}].</span>`;
+    iHint.innerHTML = `<span class="warn">inventory.json похож на разделы каталога (${keys.join(', ')}), а не на список офферов. Для фильтров нужен формат: [{"code":"...","offers":[{"supplier":"...","city":"...","qty":10,"price":1234}]}].</span>`;
   } else {
     const entries = Array.isArray(invList) ? invList : (Array.isArray(invList?.items)?invList.items:[]);
     iCount.textContent = entries.length;
-
-    // плоский поток офферов
     let offers=[];
     for(const rec of entries){
       const code = pick(rec, oMap.code || ['code','offer_id','article','id','sku','product_code','p_code']);
@@ -160,7 +155,7 @@ async function loadJSON(url){ const r=await fetch(url+'?t='+Date.now(),{cache:'n
     ];
     for(const [title, keys] of rows){
       let filled=0, vals=[];
-      for(const o of offers.slice(0,5000)){ const v = title==='code' ? o.code : pick(o.raw, keys); if(S(v)!==''){filled++; vals.push(v);} }
+      for(const o of offers){ const v = title==='code' ? o.code : pick(o.raw, keys); if(S(v)!==''){filled++; vals.push(v);} }
       const tr=document.createElement('tr');
       tr.innerHTML = `<td><b>${title}</b></td><td><code>${keys.join('</code>, <code>')}</code></td><td>${filled} / ${total} (${percent(filled,total)}%)</td><td>${sample(vals).map(v=>`<span class="chip">${S(v)}</span>`).join(' ')||'—'}</td>`;
       offerT.appendChild(tr);
