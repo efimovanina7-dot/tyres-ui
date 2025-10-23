@@ -1,0 +1,32 @@
+{
+  "product": {
+    "code":       ["code","offer_id","article","id","sku","unique_id","p_code"],
+    "brand":      ["brand","p_brand"],
+    "model":      ["model","p_model"],
+    "size_text":  ["size","p_full_name","dimension","title","attrs.title"],
+    "width":      ["width","p_width","section_width"],
+    "height":     ["height","p_height","aspect_ratio"],
+    "diameter":   ["diameter","p_diameter","rim_diameter"],
+    "season":     ["season","p_season"],
+    "country":    ["country","made_in"],
+    "image":      ["image","img","picture","image_url","img_url","p_image"],
+    "runflat":    ["runflat","run_flat","runFlat"],
+    "cargo":      ["cargo","lt"]
+  },
+  "offer": {
+    "code":        ["code","offer_id","article","id","sku","product_code","p_code"],
+    "supplier":    ["supplier","supplier_name","vendor","provider"],
+    "city":        ["warehouse_city","city","warehouseCity"],
+    "warehouse":   ["warehouse_name","warehouse"],
+    "qty":         ["qty","quantity","stock","rest"],
+    "price":       ["price","cost","opt_price","wholesale"],
+    "retail":      ["retail","rrp","msrp","price_rrp"],
+    "rrc":         ["rrc","recommended","rrp_price"],
+    "mic":         ["mic","min_inet","map"],
+    "year":        ["year","prod_year"],
+    "updated":     ["updated","updated_at","ts","timestamp"],
+    "vendor_code": ["vendor_code","vendorSku","supplier_code","supplier_sku","sku"],
+    "service_code":["service_code","svc","service"],
+    "delivery":    ["delivery","availability","in_stock"]
+  }
+}
