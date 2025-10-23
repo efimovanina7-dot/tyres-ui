@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Tyres UI — мастер + остатки (два файла)</title>
+  <title>Tyres UI — остатки и предложения (Master + Inventory)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--ink:#0b1220;--line:#334155}
@@ -51,14 +51,14 @@
         <label class="pill">Технические характеристики</label>
         <div class="filtersBox">
           <div class="pair">
-            <div><label>Ширина</label><select id="width"></select></div>
-            <div><label>Высота</label><select id="height"></select></div>
+            <div><label>Ширина</label><select id="width"><option value="">—</option></select></div>
+            <div><label>Высота</label><select id="height"><option value="">—</option></select></div>
           </div>
           <div class="pair">
-            <div><label>Диаметр</label><select id="diameter"></select></div>
-            <div><label>Страна</label><select id="country"></select></div>
+            <div><label>Диаметр</label><select id="diameter"><option value="">—</option></select></div>
+            <div><label>Страна</label><select id="country"><option value="">—</option></select></div>
           </div>
-          <div><label>Бренд</label><select id="brand"></select></div>
+          <div><label>Бренд</label><select id="brand"><option value="">—</option></select></div>
           <div><label>Модель</label><input id="model" type="text" placeholder="введите часть названия" /></div>
           <div class="pair">
             <div><label>Сезон</label><select id="season"><option value="">—</option><option>летняя</option><option>зимняя</option><option>всесезон</option></select></div>
@@ -91,14 +91,14 @@
 
           <div>
             <label>Город склада(ов)</label>
-            <div class="inline"><input id="cityQ" type="text" placeholder="поиск по городу…"/><button class="btn" id="cityClr">×</button></div>
+            <div class="inline"><input id="cityQ" type="text" placeholder="поиск по городу…"/><button class="btn" id="cityClr" type="button">×</button></div>
             <select id="cities" multiple></select>
             <div class="hint" id="cityCount">—</div>
           </div>
 
           <div>
             <label>Поставщик(и)</label>
-            <div class="inline"><input id="supQ" type="text" placeholder="поиск по поставщику…"/><button class="btn" id="supClr">×</button></div>
+            <div class="inline"><input id="supQ" type="text" placeholder="поиск по поставщику…"/><button class="btn" id="supClr" type="button">×</button></div>
             <select id="suppliers" multiple></select>
             <div class="hint" id="supCount">—</div>
           </div>
@@ -123,9 +123,9 @@
             </select>
           </div>
           <div class="inline">
-            <button class="btn primary" id="btnApply">Подобрать</button>
-            <button class="btn" id="btnReset">Сбросить</button>
-            <button class="btn" id="btnCSV" disabled>Скачать CSV</button>
+            <button class="btn primary" id="btnApply" type="button">Подобрать</button>
+            <button class="btn" id="btnReset" type="button">Сбросить</button>
+            <button class="btn" id="btnCSV" type="button" disabled>Скачать CSV</button>
           </div>
           <div class="hint" id="hint">Загружаем данные…</div>
         </div>
@@ -145,7 +145,7 @@
     </div>
   </div>
 
-  <div class="muted">Источники: <code>docs/data/master.json</code> + <code>docs/data/inventory.json</code> (обновляется Actions).</div>
+  <div class="muted">Источники: <code>docs/data/master.json</code> + <code>docs/data/inventory.json</code>.</div>
 </div>
 
 <script>
@@ -168,6 +168,7 @@ const els = {
   found: $('found'), shown: $('shown'), results: $('results'), pager: $('pager'),
   pageSize: $('pageSize'), stats: $('stats')
 };
+
 const S = v => (v==null ? '' : String(v).trim());
 const N = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const get = (o,...keys) => { for (const k of keys){ if (o && typeof o==='object' && o[k]!=null && S(o[k])!=='') return o[k]; } return ''; };
@@ -175,7 +176,19 @@ const getNum = (o,...keys)=>N(get(o,...keys));
 const uniq = arr => [...new Set(arr)];
 const byText = (a,b)=>String(a).localeCompare(String(b),'ru',{numeric:true,ignorePunctuation:true});
 
-/* ==== ПАРСИНГ МАСТЕРА (без остатков) ==== */
+/* ==== ВСПОМОГАТЕЛЬНОЕ ==== */
+function biggestArray(o,depth=0,best={len:0,arr:[]}) {
+  if(!o||depth>6) return best;
+  if(Array.isArray(o) && o.length && typeof o[0]==='object'){
+    if(o.length>best.len) best={len:o.length,arr:o};
+    return best;
+  }
+  if(typeof o==='object'){
+    for(const v of Object.values(o)) best = biggestArray(v,depth+1,best);
+  }
+  return best;
+}
+
 function parseSizeAny(rec){
   let w=get(rec,'width','p_width','section_width'), h=get(rec,'height','p_height','aspect_ratio'), d=get(rec,'diameter','p_diameter','rim_diameter');
   if(!w||!h||!d){
@@ -201,45 +214,48 @@ async function loadBoth(){
       fetch(INV_URL+'?t='+Date.now(),{cache:'no-store'})
     ]);
     if(!mr.ok) throw new Error('master.json: HTTP '+mr.status);
-    if(!ir.ok) throw new Error('inventory.json: HTTP '+ir.status);
-
     const master = await mr.json();
-    const invent = await ir.json();
 
-    // распаковать массивы
-    const masterItems = Array.isArray(master) ? master
-      : (Array.isArray(master?.items)? master.items
-         : (Array.isArray(master?.data)? master.data
-            : master));
-    const invArr = Array.isArray(invent) ? invent
-      : (Array.isArray(invent?.items)? invent.items
-         : invent);
+    let masterItems = Array.isArray(master) ? master : null;
+    if(!masterItems){
+      for(const key of ['items','data','result','products']){
+        if(Array.isArray(master?.[key])) { masterItems = master[key]; break; }
+      }
+    }
+    if(!masterItems) masterItems = biggestArray(master).arr || [];
+    if(!Array.isArray(masterItems)) masterItems = [];
 
-    // Индекс остатков по ключу (code/offer_id/…)
+    // inventory может отсутствовать — это ок, фильтры с мастера всё равно заполним
+    let invEntries=[];
+    if(ir.ok){
+      const invent = await ir.json();
+      if(Array.isArray(invent)) invEntries = invent;
+      else if(Array.isArray(invent?.items)) invEntries = invent.items;
+      else if(invent && typeof invent==='object'){
+        // формат { code: [offers] }
+        const tmp=[];
+        for(const [k,v] of Object.entries(invent)){ if(Array.isArray(v)) tmp.push({code:k,offers:v}); }
+        invEntries = tmp;
+      }
+    }
+
+    // Индекс остатков по коду
     const invMap = new Map();
-    if(Array.isArray(invArr)){
-      for(const rec of invArr){
-        const key = S(get(rec,'code','offer_id','article','id','sku','product_code','p_code'));
-        let offers = Array.isArray(rec.offers) ? rec.offers
-                    : Array.isArray(rec.suppliers) ? rec.suppliers
-                    : Array.isArray(rec.proposals) ? rec.proposals
-                    : (S(get(rec,'supplier','supplier_name','vendor','provider')) ? [rec] : []);
-        if(!key) continue;
-        if(!offers) offers = [];
-        if(!invMap.has(key)) invMap.set(key, []);
-        invMap.get(key).push(...offers);
-      }
-    }else if(invArr && typeof invArr==='object'){
-      for(const [key,val] of Object.entries(invArr)){
-        const offers = Array.isArray(val) ? val : (Array.isArray(val?.offers)?val.offers:[]);
-        if(!offers) continue;
-        invMap.set(key, offers);
-      }
+    for(const rec of invEntries){
+      const key = S(get(rec,'code','offer_id','article','id','sku','product_code','p_code'));
+      let offers = Array.isArray(rec.offers) ? rec.offers
+                  : Array.isArray(rec.suppliers) ? rec.suppliers
+                  : Array.isArray(rec.proposals) ? rec.proposals
+                  : (S(get(rec,'supplier','supplier_name','vendor','provider')) ? [rec] : []);
+      if(!key) continue;
+      if(!offers) offers = [];
+      if(!invMap.has(key)) invMap.set(key, []);
+      invMap.get(key).push(...offers);
     }
 
     // Нормализуем мастер и подклеиваем предложения
     ITEMS = [];
-    for(const it of (Array.isArray(masterItems)?masterItems:[])){
+    for(const it of masterItems){
       const id = S(get(it,'code','offer_id','article','id','sku','unique_id','p_code'));
       if(!id) continue;
       const {w,h,d} = parseSizeAny(it);
@@ -254,7 +270,7 @@ async function loadBoth(){
       const img = S(get(it,'image','img','picture','image_url','img_url','p_image'));
       const itemQty = getNum(it,'quantity','qty','stock','rest'); // если вдруг есть
 
-      // подтягиваем из inventory
+      // Подтянуть офферы
       const rawOffers = invMap.get(id) || [];
       const suppliers = rawOffers.map(s=>({
         supplier:S(get(s,'supplier','supplier_name','vendor','provider')),
@@ -275,9 +291,11 @@ async function loadBoth(){
       ITEMS.push({id,brand,model,w,h,d,country,season,spikes,runflat,cargo,mt,at,xl,img,suppliers,itemQty,raw:it});
     }
 
-    // Наполняем множества
-    const widths=[],heights=[],diams=[],brands=[],countries=[],cities=[],sups=[];
+    // Наполнить множества для фильтров
+    const widths=[],heights=[],diams=[],brands=[],countries=[];
+    const cities=[],sups=[];
     SUP_TO_CITIES.clear(); CITY_TO_SUPS.clear();
+
     for(const it of ITEMS){
       if(it.w) widths.push(it.w); if(it.h) heights.push(it.h); if(it.d) diams.push(it.d);
       if(it.brand) brands.push(it.brand); if(it.country) countries.push(it.country);
@@ -295,16 +313,18 @@ async function loadBoth(){
     sets.cities=uniq(cities).sort(byText);
     sets.suppliers=uniq(sups).sort(byText);
 
-    // заполнить селекты
-    const fillSelect=(sel, arr, withEmpty=true)=>{ const old=new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; if(withEmpty){const o=document.createElement('option');o.value='';o.textContent='—';sel.appendChild(o);} for(const v of arr){ const op=document.createElement('option'); op.value=v; op.textContent=v; if(old.has(v)) op.selected=true; sel.appendChild(op);} };
+    // Заполнить селекты
+    const fillSelect=(sel, arr)=>{ const cur=sel.value; sel.innerHTML='<option value="">—</option>'+arr.map(v=>`<option>${v}</option>`).join(''); if(arr.includes(cur)) sel.value=cur; };
     fillSelect(els.width,sets.width); fillSelect(els.height,sets.height); fillSelect(els.diameter,sets.diameter);
-    fillSelect(els.brand,sets.brands,false); fillSelect(els.country,sets.countries,false);
+    fillSelect(els.brand,sets.brands); fillSelect(els.country,sets.countries);
     refreshSupCityLists();
 
-    els.hint.textContent=`Загружено товаров: ${ITEMS.length}. С предложениями (offers): ${ITEMS.filter(x=>x.suppliers.length).length}.`;
+    const offersItems = ITEMS.filter(x=>x.suppliers.length).length;
+    els.hint.textContent=`Загружено товаров: ${ITEMS.length}. С предложениями (offers): ${offersItems}.`;
     applyFilters(true);
   }catch(e){
     els.hint.innerHTML = `<span class="warn">${e.message}</span>`;
+    console.error(e);
   }
 }
 
