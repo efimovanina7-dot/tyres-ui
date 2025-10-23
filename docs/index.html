@@ -36,7 +36,7 @@
     .pg.active{background:#22d3ee;color:#0b1220;border:none}
     .filtersBox{display:grid;gap:10px}
     .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px;white-space:pre-wrap}
     .badgeRow{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
   </style>
 </head>
@@ -46,7 +46,6 @@
 
   <div class="card">
     <div class="grid cols-3">
-      <!-- Тех. характеристики -->
       <section>
         <label class="pill">Технические характеристики</label>
         <div class="filtersBox">
@@ -76,7 +75,6 @@
         </div>
       </section>
 
-      <!-- Параметры поставщика -->
       <section>
         <label class="pill">Параметры поставщика</label>
         <div class="filtersBox">
@@ -108,7 +106,6 @@
         </div>
       </section>
 
-      <!-- Поиск / сортировка / экспорт -->
       <section>
         <label class="pill">Поиск и сортировка</label>
         <div class="filtersBox">
@@ -149,153 +146,77 @@
 </div>
 
 <script>
-/* ==== ПУТИ ==== */
-const MASTER_URL = 'data/master.json';
-const INV_URL    = 'data/inventory.json';
+const MASTER_URL='data/master.json';
+const INV_URL='data/inventory.json';
+const $=id=>document.getElementById(id);
+const els={width:$('width'),height:$('height'),diameter:$('diameter'),brand:$('brand'),model:$('model'),country:$('country'),
+season:$('season'),spikes:$('spikes'),runflat:$('runflat'),cargo:$('cargo'),mt:$('mt'),at:$('at'),xl:$('xl'),
+priceFrom:$('priceFrom'),priceTo:$('priceTo'),minPerWh:$('minPerWh'),minTotal:$('minTotal'),
+cities:$('cities'),cityQ:$('cityQ'),cityClr:$('cityClr'),cityCount:$('cityCount'),
+suppliers:$('suppliers'),supQ:$('supQ'),supClr:$('supClr'),supCount:$('supCount'),
+vendorSku:$('vendorSku'),availableOnly:$('availableOnly'),serviceCode:$('serviceCode'),q:$('q'),sort:$('sort'),
+btnApply:$('btnApply'),btnReset:$('btnReset'),btnCSV:$('btnCSV'),hint:$('hint'),found:$('found'),shown:$('shown'),
+results:$('results'),pager:$('pager'),pageSize:$('pageSize'),stats:$('stats')};
+const S=v=>v==null?'':String(v).trim(); const N=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const get=(o,...ks)=>{for(const k of ks){if(o&&typeof o==='object'&&o[k]!=null&&S(o[k])!=='')return o[k]}return''};
+const getNum=(o,...ks)=>N(get(o,...ks)); const uniq=a=>[...new Set(a)]; const byText=(a,b)=>String(a).localeCompare(String(b),'ru',{numeric:true,ignorePunctuation:true});
+function biggestArray(o,depth=0,best={len:0,arr:[],path:''},path=''){ if(!o||depth>6) return best;
+  if(Array.isArray(o)&&o.length&&typeof o[0]==='object'){ if(o.length>best.len) best={len:o.length,arr:o,path}; return best; }
+  if(typeof o==='object'){ for(const [k,v] of Object.entries(o)) best=biggestArray(v,depth+1,best,path?path+'.'+k:k); } return best; }
+function parseSizeAny(rec){ let w=get(rec,'width','p_width','section_width'),h=get(rec,'height','p_height','aspect_ratio'),d=get(rec,'diameter','p_diameter','rim_diameter');
+  if(!w||!h||!d){ const size=S(get(rec,'size','p_full_name','dimension','attrs','title')); const m=size&&size.match(/(\d{3})\s*\/\s*(\d{2})[^0-9]*R?\s*([0-9]{2})/i); if(m){w=w||m[1];h=h||m[2];d=d||m[3];}}
+  return {w:S(w),h:S(h),d:S(d)} }
+let ITEMS=[],FILTERED=[],LAST_ROWS=[],SUP_TO_CITIES=new Map(),CITY_TO_SUPS=new Map(),sets={width:[],height:[],diameter:[],brands:[],countries:[],cities:[],suppliers:[]};
 
-const $ = id => document.getElementById(id);
-const els = {
-  width: $('width'), height: $('height'), diameter: $('diameter'),
-  brand: $('brand'), model: $('model'), country: $('country'),
-  season: $('season'), spikes: $('spikes'), runflat: $('runflat'), cargo: $('cargo'),
-  mt: $('mt'), at: $('at'), xl: $('xl'),
-  priceFrom: $('priceFrom'), priceTo: $('priceTo'), minPerWh: $('minPerWh'), minTotal: $('minTotal'),
-  cities: $('cities'), cityQ: $('cityQ'), cityClr: $('cityClr'), cityCount: $('cityCount'),
-  suppliers: $('suppliers'), supQ: $('supQ'), supClr: $('supClr'), supCount: $('supCount'),
-  vendorSku: $('vendorSku'), availableOnly: $('availableOnly'),
-  serviceCode: $('serviceCode'), q: $('q'), sort: $('sort'),
-  btnApply: $('btnApply'), btnReset: $('btnReset'), btnCSV: $('btnCSV'), hint: $('hint'),
-  found: $('found'), shown: $('shown'), results: $('results'), pager: $('pager'),
-  pageSize: $('pageSize'), stats: $('stats')
-};
-
-const S = v => (v==null ? '' : String(v).trim());
-const N = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-const get = (o,...keys) => { for (const k of keys){ if (o && typeof o==='object' && o[k]!=null && S(o[k])!=='') return o[k]; } return ''; };
-const getNum = (o,...keys)=>N(get(o,...keys));
-const uniq = arr => [...new Set(arr)];
-const byText = (a,b)=>String(a).localeCompare(String(b),'ru',{numeric:true,ignorePunctuation:true});
-
-/* ==== ВСПОМОГАТЕЛЬНОЕ ==== */
-function biggestArray(o,depth=0,best={len:0,arr:[]}) {
-  if(!o||depth>6) return best;
-  if(Array.isArray(o) && o.length && typeof o[0]==='object'){
-    if(o.length>best.len) best={len:o.length,arr:o};
-    return best;
-  }
-  if(typeof o==='object'){
-    for(const v of Object.values(o)) best = biggestArray(v,depth+1,best);
-  }
-  return best;
-}
-
-function parseSizeAny(rec){
-  let w=get(rec,'width','p_width','section_width'), h=get(rec,'height','p_height','aspect_ratio'), d=get(rec,'diameter','p_diameter','rim_diameter');
-  if(!w||!h||!d){
-    const sizeStr = S(get(rec,'size','p_full_name','dimension','attrs','title'));
-    const m = sizeStr && sizeStr.match(/(\d{3})\s*\/\s*(\d{2})[^0-9]*R?\s*([0-9]{2})/i);
-    if(m){ w=w||m[1]; h=h||m[2]; d=d||m[3]; }
-  }
-  return {w:S(w),h:S(h),d:S(d)};
-}
-
-/* ==== ГЛОБАЛЬНЫЕ ==== */
-let ITEMS=[], FILTERED=[], LAST_ROWS=[];
-let SUP_TO_CITIES=new Map(), CITY_TO_SUPS=new Map();
-let sets={width:[],height:[],diameter:[],brands:[],countries:[],cities:[],suppliers:[]};
-
-/* ==== ЗАГРУЗКА И СКЛЕЙКА ==== */
 async function loadBoth(){
   try{
     els.hint.textContent='Загружаем master.json и inventory.json…';
+    const [mr,ir]=await Promise.all([fetch(MASTER_URL+'?t='+Date.now(),{cache:'no-store'}),fetch(INV_URL+'?t='+Date.now(),{cache:'no-store'})]);
+    if(!mr.ok){ els.hint.textContent='master: HTTP '+mr.status; return; }
+    const master=await mr.json();
 
-    const [mr, ir] = await Promise.all([
-      fetch(MASTER_URL+'?t='+Date.now(),{cache:'no-store'}),
-      fetch(INV_URL+'?t='+Date.now(),{cache:'no-store'})
-    ]);
-    if(!mr.ok) throw new Error('master.json: HTTP '+mr.status);
-    const master = await mr.json();
-
-    let masterItems = Array.isArray(master) ? master : null;
+    // где лежит массив?
+    let masterItems = Array.isArray(master)?master:null, masterInfo='';
     if(!masterItems){
-      for(const key of ['items','data','result','products']){
-        if(Array.isArray(master?.[key])) { masterItems = master[key]; break; }
-      }
+      for(const key of ['items','data','result','products']){ if(Array.isArray(master?.[key])){ masterItems=master[key]; masterInfo='ключ='+key; break; } }
     }
-    if(!masterItems) masterItems = biggestArray(master).arr || [];
-    if(!Array.isArray(masterItems)) masterItems = [];
-
-    // inventory может отсутствовать — это ок, фильтры с мастера всё равно заполним
-    let invEntries=[];
+    if(!masterItems){ const best=biggestArray(master); masterItems=best.arr||[]; masterInfo='fallback='+ (best.path||'???'); }
+    if(!Array.isArray(masterItems)) masterItems=[];
+    let invEntries=[], invInfo='';
     if(ir.ok){
-      const invent = await ir.json();
-      if(Array.isArray(invent)) invEntries = invent;
-      else if(Array.isArray(invent?.items)) invEntries = invent.items;
-      else if(invent && typeof invent==='object'){
-        // формат { code: [offers] }
-        const tmp=[];
-        for(const [k,v] of Object.entries(invent)){ if(Array.isArray(v)) tmp.push({code:k,offers:v}); }
-        invEntries = tmp;
-      }
-    }
+      const invent=await ir.json();
+      if(Array.isArray(invent)){ invEntries=invent; invInfo='array'; }
+      else if(Array.isArray(invent?.items)){ invEntries=invent.items; invInfo='items'; }
+      else if(invent && typeof invent==='object'){ const tmp=[]; for(const [k,v] of Object.entries(invent)){ if(Array.isArray(v)) tmp.push({code:k,offers:v}); } invEntries=tmp; invInfo='{code:[…]}'; }
+    } else { invInfo='HTTP '+ir.status; }
 
-    // Индекс остатков по коду
-    const invMap = new Map();
+    const invMap=new Map();
     for(const rec of invEntries){
-      const key = S(get(rec,'code','offer_id','article','id','sku','product_code','p_code'));
-      let offers = Array.isArray(rec.offers) ? rec.offers
-                  : Array.isArray(rec.suppliers) ? rec.suppliers
-                  : Array.isArray(rec.proposals) ? rec.proposals
-                  : (S(get(rec,'supplier','supplier_name','vendor','provider')) ? [rec] : []);
-      if(!key) continue;
-      if(!offers) offers = [];
-      if(!invMap.has(key)) invMap.set(key, []);
-      invMap.get(key).push(...offers);
+      const key=S(get(rec,'code','offer_id','article','id','sku','product_code','p_code'));
+      let offers=Array.isArray(rec.offers)?rec.offers:Array.isArray(rec.suppliers)?rec.suppliers:Array.isArray(rec.proposals)?rec.proposals:(S(get(rec,'supplier','supplier_name','vendor','provider'))?[rec]:[]);
+      if(!key) continue; if(!offers) offers=[];
+      if(!invMap.has(key)) invMap.set(key,[]); invMap.get(key).push(...offers);
     }
 
-    // Нормализуем мастер и подклеиваем предложения
-    ITEMS = [];
+    ITEMS=[];
     for(const it of masterItems){
-      const id = S(get(it,'code','offer_id','article','id','sku','unique_id','p_code'));
-      if(!id) continue;
-      const {w,h,d} = parseSizeAny(it);
-      const brand = S(get(it,'brand','p_brand'));
-      const model = S(get(it,'model','p_model'));
-      const country = S(get(it,'country','made_in'));
-      const season = S(get(it,'season','p_season'));
-      const spikes = S(get(it,'spikes','studded'));
-      const runflat = S(get(it,'runflat','run_flat'));
-      const cargo = S(get(it,'cargo','lt'));
-      const mt = !!get(it,'mt'), at=!!get(it,'at'), xl = !!get(it,'xl','extra_load','reinforced');
-      const img = S(get(it,'image','img','picture','image_url','img_url','p_image'));
-      const itemQty = getNum(it,'quantity','qty','stock','rest'); // если вдруг есть
-
-      // Подтянуть офферы
-      const rawOffers = invMap.get(id) || [];
-      const suppliers = rawOffers.map(s=>({
-        supplier:S(get(s,'supplier','supplier_name','vendor','provider')),
-        city:S(get(s,'warehouse_city','city','warehouseCity')),
-        warehouse:S(get(s,'warehouse_name','warehouse')),
-        qty:getNum(s,'qty','quantity','stock','rest'),
-        price:getNum(s,'price','cost','opt_price','wholesale'),
-        retail:getNum(s,'retail','rrp','msrp','price_rrp'),
-        rrc:getNum(s,'rrc','recommended','rrp_price'),
-        mic:getNum(s,'mic','min_inet','map'),
-        year:S(get(s,'year','prod_year')),
-        updated:S(get(s,'updated','updated_at','ts','timestamp')),
-        vendor_code:S(get(s,'vendor_code','vendorSku','supplier_code','supplier_sku','sku')),
-        service_code:S(get(s,'service_code','svc','service')),
-        delivery:S(get(s,'delivery','availability','in_stock')) || (getNum(s,'qty','quantity','stock','rest')>0?'В наличии':'—')
-      }));
-
+      const id=S(get(it,'code','offer_id','article','id','sku','unique_id','p_code')); if(!id) continue;
+      const {w,h,d}=parseSizeAny(it);
+      const brand=S(get(it,'brand','p_brand')); const model=S(get(it,'model','p_model')); const country=S(get(it,'country','made_in'));
+      const season=S(get(it,'season','p_season')); const spikes=S(get(it,'spikes','studded')); const runflat=S(get(it,'runflat','run_flat')); const cargo=S(get(it,'cargo','lt'));
+      const mt=!!get(it,'mt'),at=!!get(it,'at'),xl=!!get(it,'xl','extra_load','reinforced'); const img=S(get(it,'image','img','picture','image_url','img_url','p_image'));
+      const itemQty=getNum(it,'quantity','qty','stock','rest');
+      const rawOffers=invMap.get(id)||[];
+      const suppliers=rawOffers.map(s=>({supplier:S(get(s,'supplier','supplier_name','vendor','provider')),city:S(get(s,'warehouse_city','city','warehouseCity')),warehouse:S(get(s,'warehouse_name','warehouse')),
+        qty:getNum(s,'qty','quantity','stock','rest'),price:getNum(s,'price','cost','opt_price','wholesale'),retail:getNum(s,'retail','rrp','msrp','price_rrp'),rrc:getNum(s,'rrc','recommended','rrp_price'),mic:getNum(s,'mic','min_inet','map'),
+        year:S(get(s,'year','prod_year')),updated:S(get(s,'updated','updated_at','ts','timestamp')),vendor_code:S(get(s,'vendor_code','vendorSku','supplier_code','supplier_sku','sku')),service_code:S(get(s,'service_code','svc','service')),
+        delivery:S(get(s,'delivery','availability','in_stock')) || (getNum(s,'qty','quantity','stock','rest')>0?'В наличии':'—') }));
       ITEMS.push({id,brand,model,w,h,d,country,season,spikes,runflat,cargo,mt,at,xl,img,suppliers,itemQty,raw:it});
     }
 
-    // Наполнить множества для фильтров
-    const widths=[],heights=[],diams=[],brands=[],countries=[];
-    const cities=[],sups=[];
+    // множества
+    const widths=[],heights=[],diams=[],brands=[],countries=[],cities=[],sups=[];
     SUP_TO_CITIES.clear(); CITY_TO_SUPS.clear();
-
     for(const it of ITEMS){
       if(it.w) widths.push(it.w); if(it.h) heights.push(it.h); if(it.d) diams.push(it.d);
       if(it.brand) brands.push(it.brand); if(it.country) countries.push(it.country);
@@ -305,215 +226,56 @@ async function loadBoth(){
         if(s.city){ if(!CITY_TO_SUPS.has(s.city)) CITY_TO_SUPS.set(s.city,new Set()); if(s.supplier) CITY_TO_SUPS.get(s.city).add(s.supplier); }
       }
     }
-    sets.width=uniq(widths).sort((a,b)=>Number(a)-Number(b));
-    sets.height=uniq(heights).sort((a,b)=>Number(a)-Number(b));
-    sets.diameter=uniq(diams).sort((a,b)=>Number(a)-Number(b));
-    sets.brands=uniq(brands).sort(byText);
-    sets.countries=uniq(countries).sort(byText);
-    sets.cities=uniq(cities).sort(byText);
-    sets.suppliers=uniq(sups).sort(byText);
-
-    // Заполнить селекты
-    const fillSelect=(sel, arr)=>{ const cur=sel.value; sel.innerHTML='<option value="">—</option>'+arr.map(v=>`<option>${v}</option>`).join(''); if(arr.includes(cur)) sel.value=cur; };
-    fillSelect(els.width,sets.width); fillSelect(els.height,sets.height); fillSelect(els.diameter,sets.diameter);
-    fillSelect(els.brand,sets.brands); fillSelect(els.country,sets.countries);
+    const fill=(sel,arr)=>{ const cur=sel.value; sel.innerHTML='<option value="">—</option>'+[...new Set(arr)].sort(byText).map(v=>`<option>${v}</option>`).join(''); if(arr.includes(cur)) sel.value=cur; };
+    fill(els.width,widths); fill(els.height,heights); fill(els.diameter,diams); fill(els.brand,brands); fill(els.country,countries);
     refreshSupCityLists();
 
-    const offersItems = ITEMS.filter(x=>x.suppliers.length).length;
-    els.hint.textContent=`Загружено товаров: ${ITEMS.length}. С предложениями (offers): ${offersItems}.`;
-    applyFilters(true);
-  }catch(e){
-    els.hint.innerHTML = `<span class="warn">${e.message}</span>`;
-    console.error(e);
+    const offersItems=ITEMS.filter(x=>x.suppliers.length).length;
+    els.hint.textContent=`master: OK (${masterInfo} → ${ITEMS.length}) · inventory: ${invInfo} (товаров с offers: ${offersItems})`;
+    applyFilters();
+  }catch(e){ els.hint.innerHTML=`<span class="warn">${e.message}</span>`; console.error(e); }
+}
+
+function fillMulti(sel,arr){ const prev=new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; [...new Set(arr)].sort(byText).forEach(v=>{ const o=document.createElement('option'); o.value=v;o.textContent=v;if(prev.has(v))o.selected=true; sel.appendChild(o); }); }
+function refreshSupCityLists(){ const qCity=els.cityQ.value.toLowerCase(),qSup=els.supQ.value.toLowerCase(); const selCities=new Set([...els.cities.selectedOptions].map(o=>o.value)); const selSups=new Set([...els.suppliers.selectedOptions].map(o=>o.value));
+  let allowedCities= selSups.size? [...selSups].reduce((acc,s)=>{const c=SUP_TO_CITIES.get(s); if(c) for(const x of c) acc.add(x); return acc;}, new Set()) : new Set([...CITY_TO_SUPS.keys()]);
+  let allowedSups  = selCities.size? [...selCities].reduce((acc,c)=>{const s=CITY_TO_SUPS.get(c); if(s) for(const x of s) acc.add(x); return acc;}, new Set()) : new Set([...SUP_TO_CITIES.keys()]);
+  allowedCities=[...allowedCities].filter(c=>!qCity||c.toLowerCase().includes(qCity)); allowedSups=[...allowedSups].filter(s=>!qSup||s.toLowerCase().includes(qSup));
+  fillMulti(els.cities,allowedCities); fillMulti(els.suppliers,allowedSups); els.cityCount.textContent=`${els.cities.options.length} городов`; els.supCount.textContent=`${els.suppliers.options.length} поставщиков`; }
+
+function applyFilters(){ /* упрощённая, как раньше */ const width=S(els.width.value),height=S(els.height.value),diameter=S(els.diameter.value),brand=S(els.brand.value),modelQ=S(els.model.value).toLowerCase(); const country=S(els.country.value),season=S(els.season.value);
+  const minPerWh=N(els.minPerWh.value)||0,minTotal=N(els.minTotal.value)||0; const selCities=new Set([...els.cities.selectedOptions].map(o=>o.value)); const selSups=new Set([...els.suppliers.selectedOptions].map(o=>o.value));
+  const priceFrom=N(els.priceFrom.value)||0,priceTo=N(els.priceTo.value)||0; const vendorSku=S(els.vendorSku.value).toLowerCase(); const availableOnly=els.availableOnly.checked; const q=S(els.q.value).toLowerCase(); const sort=S(els.sort.value); const pageSize=Number(els.pageSize.value)||20;
+  const out=[]; for(const it of ITEMS){ if(width&&it.w!==width)continue; if(height&&it.h!==height)continue; if(diameter&&it.d!==diameter)continue; if(brand&&it.brand!==brand)continue; if(country&&it.country!==country)continue; if(season&&S(it.season).toLowerCase()!==season)continue; if(modelQ&&!(`${it.model} ${it.id}`.toLowerCase().includes(modelQ)))continue;
+    let sumQty=0; const offers=[]; for(const s of it.suppliers){ if(selCities.size&&!selCities.has(s.city))continue; if(selSups.size&&!selSups.has(s.supplier))continue; if(priceFrom&&s.price<priceFrom)continue; if(priceTo&&s.price>priceTo)continue; if(minPerWh&&s.qty<minPerWh)continue; if(vendorSku&&!S(s.vendor_code).toLowerCase().includes(vendorSku))continue; if(availableOnly&&!(s.qty>0))continue; sumQty+=s.qty||0; offers.push(s); }
+    const totalQty = sumQty || (it.itemQty||0); if(minTotal&&totalQty<minTotal)continue; if(offers.length===0&&totalQty===0)continue; if(q&&!`${it.id} ${it.brand} ${it.model} ${it.w}/${it.h} R${it.d}`.toLowerCase().includes(q))continue;
+    const best = offers.length? [...offers].sort((a,b)=>a.price-b.price)[0]:null; const supSet=uniq(offers.map(o=>o.supplier));
+    out.push({it,offers,totalQty,agg:{minPrice:offers.length?Math.min(...offers.map(o=>o.price||Infinity)):'',bestCity:best?.city||'',supList:supSet.slice(0,3).join(', ')+(supSet.length>3?` +${supSet.length-3}`:'')}});
   }
-}
+  if(sort==='price_desc') out.sort((a,b)=>( (b.agg.minPrice||1e15)-(a.agg.minPrice||1e15) )); else if(sort==='updated_desc'){} else if(sort==='qty_desc') out.sort((a,b)=>b.totalQty-a.totalQty); else out.sort((a,b)=>( (a.agg.minPrice||1e15)-(b.agg.minPrice||1e15) ));
+  FILTERED=out; els.found.textContent=FILTERED.length; renderPage(1,pageSize); }
 
-/* ==== ВЗАИМНОЕ СУЖЕНИЕ Поставщик ↔ Город ==== */
-function fillMulti(sel, arr){ const prev=new Set([...sel.selectedOptions].map(o=>o.value)); sel.innerHTML=''; for(const v of arr){ const o=document.createElement('option'); o.value=v; o.textContent=v; if(prev.has(v)) o.selected=true; sel.appendChild(o);} }
-function refreshSupCityLists(){
-  const qCity=S(els.cityQ.value).toLowerCase(), qSup=S(els.supQ.value).toLowerCase();
-  const selCities=new Set([...els.cities.selectedOptions].map(o=>o.value));
-  const selSups=new Set([...els.suppliers.selectedOptions].map(o=>o.value));
-
-  let allowedCities;
-  if(selSups.size>0){ const acc=new Set(); for(const s of selSups){ const cset=SUP_TO_CITIES.get(s); if(cset) for(const c of cset) acc.add(c);} allowedCities=[...acc]; }
-  else allowedCities=[...sets.cities];
-  if(qCity) allowedCities=allowedCities.filter(c=>c.toLowerCase().includes(qCity)); allowedCities.sort(byText);
-
-  let allowedSups;
-  if(selCities.size>0){ const acc=new Set(); for(const c of selCities){ const sset=CITY_TO_SUPS.get(c); if(sset) for(const s of sset) acc.add(s);} allowedSups=[...acc]; }
-  else allowedSups=[...sets.suppliers];
-  if(qSup) allowedSups=allowedSups.filter(s=>s.toLowerCase().includes(qSup)); allowedSups.sort(byText);
-
-  fillMulti(els.cities,allowedCities); fillMulti(els.suppliers,allowedSups);
-  els.cityCount.textContent=`${els.cities.options.length} городов`;
-  els.supCount.textContent=`${els.suppliers.options.length} поставщиков`;
-}
-
-/* ==== ФИЛЬТРЫ + ВЫВОД ==== */
-function applyFilters(){
-  const width=S(els.width.value),height=S(els.height.value),diameter=S(els.diameter.value);
-  const brand=S(els.brand.value),modelQ=S(els.model.value).toLowerCase();
-  const country=S(els.country.value),season=S(els.season.value);
-  const spikes=S(els.spikes.value),runflat=S(els.runflat.value),cargo=S(els.cargo.value);
-  const mt=els.mt.checked,at=els.at.checked,xl=els.xl.checked;
-  const priceFrom=N(els.priceFrom.value)||0,priceTo=N(els.priceTo.value)||0;
-  const minPerWh=N(els.minPerWh.value)||0,minTotal=N(els.minTotal.value)||0;
-  const selCities=new Set([...els.cities.selectedOptions].map(o=>o.value));
-  const selSups=new Set([...els.suppliers.selectedOptions].map(o=>o.value));
-  const vendorSku=S(els.vendorSku.value).toLowerCase(), availableOnly=els.availableOnly.checked;
-  const serviceCode=S(els.serviceCode.value).toLowerCase(), q=S(els.q.value).toLowerCase();
-  const sort=S(els.sort.value), pageSize=Number(els.pageSize.value)||20;
-
-  const out=[];
-  for(const it of ITEMS){
-    if(width && it.w!==width) continue;
-    if(height && it.h!==height) continue;
-    if(diameter && it.d!==diameter) continue;
-    if(brand && it.brand!==brand) continue;
-    if(country && it.country!==country) continue;
-    if(season && S(it.season).toLowerCase()!==season) continue;
-    if(spikes){ const v=S(it.spikes).toLowerCase(); if((spikes==='yes' && !(v.includes('yes')||v.includes('есть'))) || (spikes==='no' && (v.includes('yes')||v.includes('есть')))) continue; }
-    if(runflat){ const v=S(it.runflat).toLowerCase(); if((runflat==='yes' && !v) || (runflat==='no' && v)) continue; }
-    if(cargo){ const v=S(it.cargo).toLowerCase(); if((cargo==='yes' && !v) || (cargo==='no' && v)) continue; }
-    if(mt && !it.mt) continue; if(at && !it.at) continue; if(xl && !it.xl) continue;
-    if(modelQ && !(`${it.model} ${it.id}`.toLowerCase().includes(modelQ))) continue;
-
-    let sumQty=0; const offers=[];
-    for(const s of it.suppliers){
-      if(selCities.size>0 && !selCities.has(s.city)) continue;
-      if(selSups.size>0 && !selSups.has(s.supplier)) continue;
-      if(priceFrom && s.price<priceFrom) continue;
-      if(priceTo && s.price>priceTo) continue;
-      if(minPerWh && s.qty<minPerWh) continue;
-      if(vendorSku && !S(s.vendor_code).toLowerCase().includes(vendorSku)) continue;
-      if(serviceCode && !S(s.service_code).toLowerCase().includes(serviceCode)) continue;
-      if(availableOnly && !(s.qty>0)) continue;
-      sumQty += s.qty||0;
-      offers.push(s);
-    }
-    const baseQty = it.itemQty || 0;
-    const totalQty = (sumQty>0 ? sumQty : baseQty);
-
-    if(minTotal && totalQty<minTotal) continue;
-    if(offers.length===0 && totalQty===0) continue;
-
-    if(q){ const hay = `${it.id} ${it.brand} ${it.model} ${it.w}/${it.h} R${it.d}`.toLowerCase(); if(!hay.includes(q)) continue; }
-
-    const best = offers.length ? [...offers].sort((a,b)=>a.price-b.price)[0] : null;
-    const supSet = uniq(offers.map(o=>o.supplier));
-    out.push({
-      it, offers, totalQty,
-      agg:{
-        minPrice: offers.length ? Math.min(...offers.map(o=>o.price||Infinity)) : '',
-        maxUpdated: (offers.map(o=>Date.parse(o.updated)).filter(x=>x>0).sort((a,b)=>b-a)[0])||0,
-        bestCity: best?.city || '',
-        supList: supSet.slice(0,3).join(', ') + (supSet.length>3 ? ` +${supSet.length-3}` : '')
-      }
-    });
-  }
-
-  if(sort==='price_desc') out.sort((a,b)=>( (b.agg.minPrice||1e15) - (a.agg.minPrice||1e15) ));
-  else if(sort==='updated_desc') out.sort((a,b)=>b.agg.maxUpdated-a.agg.maxUpdated);
-  else if(sort==='qty_desc') out.sort((a,b)=>b.totalQty-a.totalQty);
-  else out.sort((a,b)=>( (a.agg.minPrice||1e15) - (b.agg.minPrice||1e15) ));
-
-  FILTERED=out; els.found.textContent=FILTERED.length;
-  renderPage(1,pageSize);
-}
-
-function renderPage(page,pageSize){
-  const total=FILTERED.length, pages=Math.max(1,Math.ceil(total/pageSize));
-  if(page>pages) page=pages; const start=(page-1)*pageSize; const slice=FILTERED.slice(start,start+pageSize);
-  LAST_ROWS=[];
-
-  const html = slice.map(row=>{
-    const it=row.it, a=row.agg, qty=row.totalQty;
-    LAST_ROWS.push({offer_id:it.id,brand:it.brand,model:it.model,size:`${it.w}/${it.h} R${it.d}`,quantity:qty,min_price:a.minPrice||'',suppliers:a.supList,best_city:a.bestCity});
-    return `
-    <div class="row">
-      <div><img class="img" src="${esc(it.img||'')}" onerror="this.style.opacity=.15" alt=""></div>
-      <div>
-        <div style="font-weight:600">${esc(it.brand||'')} ${esc(it.model||'')}</div>
-        <div class="badgeRow">
-          <span class="pill">Общий остаток: <b>${qty}</b> шт.</span>
-          ${a.minPrice ? `<span class="pill">Мин. опт: <b>${fmt(a.minPrice)}</b></span>` : ''}
-          ${a.bestCity ? `<span class="pill">Город: ${esc(a.bestCity)}</span>` : ''}
-        </div>
-        <div class="kvs">
-          <b>Код</b><div><code>${esc(it.id||'')}</code></div>
-          <b>Типоразмер</b><div>${esc(`${it.w||'?'}/${it.h||'?'} R${it.d||'?'}`)}</div>
-          <b>Сезон</b><div>${esc(it.season||'—')}${it.xl?' · XL':''}${it.mt?' · MT':''}${it.at?' · AT':''}${S(it.spikes).toLowerCase().includes('yes')?' · шипы':''}${it.runflat?' · RunFlat':''}${it.cargo?' · Cargo':''}</div>
-          <b>Страна</b><div>${esc(it.country||'—')}</div>
-        </div>
-      </div>
-      <div>
-        <table>
-          <thead><tr>
-            <th>Розн. цена</th><th>Доставка</th><th>Склад</th>
-            <th>Код пост.</th><th>Сервис</th><th>Кол-во</th>
-            <th>Опт. цена</th><th>РРЦ</th><th>МИЦ</th><th>Год</th><th>Обновлено</th>
-          </tr></thead>
-          <tbody>
-            ${row.offers.slice(0,6).map(o=>`
-              <tr>
-                <td>${o.retail?fmt(o.retail):'—'}</td>
-                <td>${esc(o.delivery||'—')}</td>
-                <td>${esc(o.city||'—')}${o.warehouse?(' · '+esc(o.warehouse)) : ''}</td>
-                <td>${esc(o.vendor_code||'')}</td>
-                <td>${esc(o.service_code||'')}</td>
-                <td>${o.qty||0}</td>
-                <td>${o.price?fmt(o.price):'—'}</td>
-                <td>${o.rrc?fmt(o.rrc):'—'}</td>
-                <td>${o.mic?fmt(o.mic):'—'}</td>
-                <td>${esc(o.year||'')}</td>
-                <td>${esc(o.updated||'')}</td>
-              </tr>
-            `).join('')}
-            ${row.offers.length>6?`<tr><td colspan="11" class="muted">ещё ${row.offers.length-6} предложений скрыто</td></tr>`:''}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <hr style="border:none;border-top:1px solid #1f2937;margin:12px 0">
-    `;
-  }).join('');
-
-  els.results.innerHTML = html || `<div class="muted">Ничего не найдено по текущим фильтрам.</div>`;
-  els.shown.textContent = slice.length;
-
-  const totRows = FILTERED.reduce((acc,r)=>acc+r.offers.length,0);
-  els.stats.textContent = `Всего строк предложений: ${totRows}`;
-
-  els.btnCSV.disabled = LAST_ROWS.length===0;
-
-  els.pager.innerHTML='';
-  for(let i=1;i<=pages;i++){ const b=document.createElement('button'); b.className='pg'+(i===page?' active':''); b.textContent=i; b.onclick=()=>renderPage(i,pageSize); els.pager.appendChild(b); }
-}
-
-function fmt(x){ return Intl.NumberFormat('ru-RU').format(Math.round(x))+' ₽'; }
-function esc(s){ return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-/* связи */
-['input','change'].forEach(ev=>{
-  els.cityQ.addEventListener(ev, refreshSupCityLists);
-  els.supQ.addEventListener(ev, refreshSupCityLists);
-  els.cities.addEventListener(ev, refreshSupCityLists);
-  els.suppliers.addEventListener(ev, refreshSupCityLists);
-});
+function renderPage(page,pageSize){ const total=FILTERED.length,pages=Math.max(1,Math.ceil(total/pageSize)); if(page>pages)page=pages; const start=(page-1)*pageSize; const slice=FILTERED.slice(start,start+pageSize); LAST_ROWS=[];
+  els.results.innerHTML = slice.map(row=>{ const it=row.it,a=row.agg,qty=row.totalQty; LAST_ROWS.push({offer_id:it.id,brand:it.brand,model:it.model,size:`${it.w}/${it.h} R${it.d}`,quantity:qty,min_price:a.minPrice||'',suppliers:a.supList,best_city:a.bestCity});
+    return `<div class="row"><div><img class="img" src="${esc(it.img||'')}" onerror="this.style.opacity=.15" alt=""></div><div><div style="font-weight:600">${esc(it.brand||'')} ${esc(it.model||'')}</div>
+    <div class="badgeRow"><span class="pill">Общий остаток: <b>${qty}</b> шт.</span>${a.minPrice?`<span class="pill">Мин. опт: <b>${fmt(a.minPrice)}</b></span>`:''}${a.bestCity?`<span class="pill">Город: ${esc(a.bestCity)}</span>`:''}</div>
+    <div class="kvs"><b>Код</b><div><code>${esc(it.id||'')}</code></div><b>Типоразмер</b><div>${esc(`${it.w||'?'}/${it.h||'?'} R${it.d||'?'}`)}</div><b>Сезон</b><div>${esc(it.season||'—')}</div><b>Страна</b><div>${esc(it.country||'—')}</div></div></div>
+    <div><table><thead><tr><th>Розн. цена</th><th>Доставка</th><th>Склад</th><th>Код пост.</th><th>Сервис</th><th>Кол-во</th><th>Опт. цена</th><th>РРЦ</th><th>МИЦ</th><th>Год</th><th>Обновлено</th></tr></thead>
+    <tbody>${row.offers.slice(0,6).map(o=>`<tr><td>${o.retail?fmt(o.retail):'—'}</td><td>${esc(o.delivery||'—')}</td><td>${esc(o.city||'—')}${o.warehouse?(' · '+esc(o.warehouse)) : ''}</td><td>${esc(o.vendor_code||'')}</td><td>${esc(o.service_code||'')}</td><td>${o.qty||0}</td><td>${o.price?fmt(o.price):'—'}</td><td>${o.rrc?fmt(o.rrc):'—'}</td><td>${o.mic?fmt(o.mic):'—'}</td><td>${esc(o.year||'')}</td><td>${esc(o.updated||'')}</td></tr>`).join('')}
+    ${row.offers.length>6?`<tr><td colspan="11" class="muted">ещё ${row.offers.length-6} предложений скрыто</td></tr>`:''}</tbody></table></div></div><hr style="border:none;border-top:1px solid #1f2937;margin:12px 0">`; }).join('') || `<div class="muted">Ничего не найдено по текущим фильтрам.</div>`;
+  els.shown.textContent=slice.length; els.stats.textContent=`Всего строк предложений: ${FILTERED.reduce((a,r)=>a+r.offers.length,0)}`;
+  els.pager.innerHTML=''; for(let i=1;i<=pages;i++){ const b=document.createElement('button'); b.className='pg'+(i===page?' active':''); b.textContent=i; b.onclick=()=>renderPage(i,pageSize); els.pager.appendChild(b); } }
+function fmt(x){return Intl.NumberFormat('ru-RU').format(Math.round(x))+' ₽'} function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+['input','change'].forEach(ev=>{ els.cityQ.addEventListener(ev,refreshSupCityLists); els.supQ.addEventListener(ev,refreshSupCityLists); els.cities.addEventListener(ev,refreshSupCityLists); els.suppliers.addEventListener(ev,refreshSupCityLists); });
 els.cityClr.onclick=()=>{ els.cityQ.value=''; [...els.cities.options].forEach(o=>o.selected=false); refreshSupCityLists(); };
 els.supClr.onclick=()=>{ els.supQ.value=''; [...els.suppliers.options].forEach(o=>o.selected=false); refreshSupCityLists(); };
 els.btnApply.onclick=()=>applyFilters();
-els.btnReset.onclick=()=>{
-  for(const id of ['width','height','diameter','brand','country','season','spikes','runflat','cargo']) els[id].selectedIndex=0;
+els.btnReset.onclick=()=>{ for(const id of ['width','height','diameter','brand','country','season','spikes','runflat','cargo']) els[id].selectedIndex=0;
   for(const id of ['model','priceFrom','priceTo','minPerWh','minTotal','vendorSku','serviceCode','q','cityQ','supQ']) els[id].value='';
   els.minPerWh.value=1; els.minTotal.value=1; els.mt.checked=els.at.checked=els.xl.checked=els.availableOnly.checked=false;
   [...els.cities.options].forEach(o=>o.selected=false); [...els.suppliers.options].forEach(o=>o.selected=false);
-  refreshSupCityLists(); applyFilters();
-};
+  refreshSupCityLists(); applyFilters(); };
 els.pageSize.onchange=()=>applyFilters();
-
-/* старт */
 loadBoth();
 </script>
 </body>
